@@ -85,19 +85,34 @@ type BudgetPeriod struct {
 	Amount    Decimal `json:"amount"`
 }
 
-// BudgetAlert is one threshold on a budget and whether spend has crossed it
+// The bases a budget alert threshold is held against: BudgetAlertBasisActual the spend so far in
+// the period, BudgetAlertBasisForecast the forecast for the period's end, which only a cost budget
+// has. More values may be added to what a read returns.
+const (
+	BudgetAlertBasisActual   = "actual"
+	BudgetAlertBasisForecast = "forecast"
+)
+
+// BudgetAlert is one threshold on a budget and whether it has fired this period. The API returns a
+// budget's spend thresholds lowest first, then its forecast thresholds lowest first.
 type BudgetAlert struct {
 	ThresholdPercent int `json:"thresholdPercent"`
+	// Basis is BudgetAlertBasisActual or BudgetAlertBasisForecast.
+	Basis string `json:"basis"`
 	// AppIDs are the notification channels this threshold delivers to.
 	AppIDs      []string   `json:"appIds,omitempty"`
 	IsTriggered bool       `json:"isTriggered"`
 	TriggeredAt *time.Time `json:"triggeredAt,omitempty"`
 }
 
-// BudgetAlertInput sets a threshold, as a percentage of the current period's amount. When several
-// are crossed at once only the highest notifies.
+// BudgetAlertInput sets a threshold, a whole percent from 1 to 200 of the current period's amount,
+// each percent once per basis. Basis is BudgetAlertBasisActual when unset; a forecast threshold
+// notifies once a period when the forecast for the period's end reaches it, and a usage budget
+// refuses one. When several are crossed at once only the highest notifies, the spend threshold
+// at an equal percent.
 type BudgetAlertInput struct {
-	ThresholdPercent int `json:"thresholdPercent"`
+	ThresholdPercent int    `json:"thresholdPercent"`
+	Basis            string `json:"basis,omitempty"`
 }
 
 // BudgetsListResponse is the response for listing budgets
@@ -188,23 +203,27 @@ func (c *Client) CreateBudget(ctx context.Context, input *CreateBudgetInput) (*B
 	return c.doBudget(req)
 }
 
-// UpdateBudgetInput for updating a budget. The start date, cadence, currency, measure and alerts are
-// fixed at creation. Amount gives every period that amount and Periods replaces them, at most one of
-// the two, nil leaving the amounts. AppIDs replaces the notification channels: nil leaves them, an
+// UpdateBudgetInput for updating a budget. The start date, cadence, currency and measure are fixed
+// at creation. Amount gives every period that amount and Periods replaces them, at most one of the
+// two, nil leaving the amounts. AppIDs replaces the notification channels: nil leaves them, an
 // empty slice removes them all. UsageUnit changes a usage budget's unit and keeps its periods'
 // amounts; a cost budget refuses it, and a usage budget refuses a segment or ClearCostReport.
+// Alerts replaces the thresholds in place, nil leaving them and an empty slice refused: one kept at
+// the same percent and basis keeps whether it fired this period, a new one starts armed on the
+// budget's channels, and one left out is removed. The budget keeps its ID and history.
 type UpdateBudgetInput struct {
 	Name    *string         `json:"name,omitempty"`
 	Amount  *Decimal        `json:"amount,omitempty"`
 	Periods *[]BudgetPeriod `json:"periods,omitempty"`
 	// SegmentID or CostReportID moves the budget onto that scope; ClearSegment or ClearCostReport
 	// returns it to the whole workspace. Naming none keeps the scope.
-	SegmentID       *string   `json:"segmentId,omitempty"`
-	ClearSegment    bool      `json:"clearSegment,omitempty"`
-	CostReportID    *string   `json:"costReportId,omitempty"`
-	ClearCostReport bool      `json:"clearCostReport,omitempty"`
-	AppIDs          *[]string `json:"appIds,omitempty"`
-	UsageUnit       *string   `json:"usageUnit,omitempty"`
+	SegmentID       *string             `json:"segmentId,omitempty"`
+	ClearSegment    bool                `json:"clearSegment,omitempty"`
+	CostReportID    *string             `json:"costReportId,omitempty"`
+	ClearCostReport bool                `json:"clearCostReport,omitempty"`
+	AppIDs          *[]string           `json:"appIds,omitempty"`
+	UsageUnit       *string             `json:"usageUnit,omitempty"`
+	Alerts          *[]BudgetAlertInput `json:"alerts,omitempty"`
 }
 
 // UpdateBudget updates an existing budget

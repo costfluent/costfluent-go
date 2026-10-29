@@ -454,3 +454,29 @@ func TestPlainTextNotFoundKeepsItsBody(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestAPIErrorRetryAfterIsTheWaitA429AskedFor(t *testing.T) {
+	now := time.Date(2026, 10, 26, 9, 0, 0, 0, time.UTC)
+	for name, c := range map[string]struct {
+		status int
+		header http.Header
+		want   time.Duration
+	}{
+		"Retry-After on a 429":      {http.StatusTooManyRequests, http.Header{"Retry-After": {"120"}}, 2 * time.Minute},
+		"RateLimit-Reset alone":     {http.StatusTooManyRequests, http.Header{"Ratelimit-Reset": {"90"}}, 90 * time.Second},
+		"a 429 naming no wait":      {http.StatusTooManyRequests, http.Header{}, 0},
+		"Retry-After on a 503":      {http.StatusServiceUnavailable, http.Header{"Retry-After": {"30"}}, 0},
+		"a 404 with no wait at all": {http.StatusNotFound, http.Header{}, 0},
+	} {
+		t.Run(name, func(t *testing.T) {
+			resp := &http.Response{StatusCode: c.status, Header: c.header, Body: io.NopCloser(strings.NewReader(`{"title":"refused"}`))}
+			var ae *APIError
+			if !errors.As(parseError(resp, now), &ae) {
+				t.Fatal("not an APIError")
+			}
+			if got := ae.RetryAfter(); got != c.want {
+				t.Errorf("RetryAfter() = %s, want %s", got, c.want)
+			}
+		})
+	}
+}

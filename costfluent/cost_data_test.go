@@ -181,3 +181,45 @@ func TestCostSummaryFiguresTheAPISendsAsNullStayNull(t *testing.T) {
 		})
 	}
 }
+
+// A read states how its amortized figures placed commitment discounts, on a page of cost data and
+// on a summary alike.
+func TestCostReadsStateHowCommitmentDiscountsArePlaced(t *testing.T) {
+	c, _ := testClient(t,
+		stub{200, `{"links":{"self":"s"},"data":[],"meta":{"startDate":"2026-09-01","endDate":"2026-09-30",
+			"granularity":"day","totalRecords":0,"totalCost":"0","currency":"USD","commitmentDiscounts":"blended",
+			"dataVersion":"3f2a9c0d1e4b5a68"}}`},
+		stub{200, `{"totalCost":"100.00000000","currency":"USD","commitmentDiscounts":"asApplied"}`},
+	)
+	window := CostFilterOptions{StartDate: "2026-09-01", EndDate: "2026-09-30"}
+
+	data, err := c.QueryCostData(context.Background(), &CostDataQuery{CostFilterOptions: window})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data.Meta.CommitmentDiscounts != CommitmentDiscountPlacementBlended {
+		t.Errorf("cost data placement %q, want blended", data.Meta.CommitmentDiscounts)
+	}
+
+	summary, err := c.GetCostSummary(context.Background(), &window)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.CommitmentDiscounts != CommitmentDiscountPlacementAsApplied {
+		t.Errorf("summary placement %q, want asApplied", summary.CommitmentDiscounts)
+	}
+}
+
+func TestCommitmentDiscountPlacementsMatchTheContract(t *testing.T) {
+	wantContractValues(t, "CommitmentDiscountPlacement", CommitmentDiscountPlacements())
+}
+
+func TestMeasuresMatchTheContract(t *testing.T) {
+	wantContractValues(t, "CostMeasure", []string{MeasureCost, MeasureUsage, MeasureCount})
+}
+
+func TestGranularitiesMatchTheContract(t *testing.T) {
+	wantContractValues(t, "DateBin", []string{
+		GranularityDay, GranularityWeek, GranularityMonth, GranularityQuarter, GranularityCumulative,
+	})
+}

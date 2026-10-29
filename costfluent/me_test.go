@@ -88,3 +88,7 @@ func TestMissingNamesWhatTheTokenLacks(t *testing.T) {
 		t.Errorf("Missing = %v when nothing is needed", missing)
 	}
 }
+
+func TestTokenTypesMatchTheContract(t *testing.T) {
+	wantContractValues(t, "ApiTokenType", []string{TokenTypeOrganization, TokenTypeWorkspace, TokenTypeCluster})
+}

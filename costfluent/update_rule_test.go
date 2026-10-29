@@ -21,12 +21,12 @@ func TestUpdatesSendTheirNewFieldsOnlyWhenSet(t *testing.T) {
 			body: providerJSON,
 			set: func(c *Client) error {
 				_, err := c.UpdateProvider(ctx, "prv_1", &UpdateProviderInput{
-					Name: ptr("AWS production (EU)"), ClearDescription: true, ClearSettings: true,
+					DisplayName: ptr("AWS production (EU)"), ClearDescription: true, ClearSettings: true,
 				})
 				return err
 			},
 			unset: func(c *Client) error { _, err := c.UpdateProvider(ctx, "prv_1", &UpdateProviderInput{}); return err },
-			want:  map[string]any{"name": "AWS production (EU)", "clearDescription": true, "clearSettings": true},
+			want:  map[string]any{"displayName": "AWS production (EU)", "clearDescription": true, "clearSettings": true},
 		},
 		{
 			name: "budget",

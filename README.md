@@ -38,7 +38,7 @@ func main() {
     }
 
     for _, p := range providers {
-        log.Printf("Provider: %s (%s)", p.Name, p.ID)
+        log.Printf("Provider: %s (%s)", p.DisplayName, p.ID)
     }
 }
 ```
@@ -51,6 +51,7 @@ client := costfluent.NewClient(
     costfluent.WithWorkspace("wsp_yyyy"),        // Default workspace
     costfluent.WithBaseURL("https://api.costfluent.com"), // Custom base URL
     costfluent.WithTimeout(60 * time.Second),    // Custom timeout
+    costfluent.WithMaxRetryAfter(10 * time.Second), // Longest rate-limit wait to sit out (default 60s)
     costfluent.WithDebug(true),                  // Enable debug logging
 )
 ```
@@ -164,8 +165,8 @@ Money is a `costfluent.Decimal`, the exact decimal string the API writes (`"1250
 with `Rat`. `ParseDecimal` checks an amount before it is sent. Percentages stay `float64`.
 
 A single read, create or update of an allocation rule, app, budget, business metric, cost alert,
-cost report, cost report subscription, dashboard, widget, folder, provider, saved filter, segment,
-team, virtual tag or workspace carries the resource's `ETag`; an allocation rule and a segment have
+cost report, cost report subscription, dashboard, widget, folder, provider, saved filter, savings
+view, segment, team, virtual tag or workspace carries the resource's `ETag`; an allocation rule and a segment have
 no single read, so only their create and update do. Passing it to an update, deletion, pause,
 resume, activation or saved-filter change as
 `costfluent.IfMatch(resource.ETag)` applies the write only while the resource is unchanged since;
@@ -197,6 +198,10 @@ Error helper functions:
 - `GetProvider`, `CreateProvider`, `UpdateProvider`, `DeleteProvider`
 - `TestProviderConnection`, `TriggerProviderSync`
 
+### Custom Connections
+- `SubmitCosts` writes a batch of `CostEntry` rows to a custom connection; the rows the API refuses
+  come back in the result's `Errors`, not as an error.
+
 ### Workspaces
 - `ListWorkspaces`, `ListAllWorkspaces`
 - `GetWorkspace`, `CreateWorkspace`, `UpdateWorkspace`, `DeleteWorkspace`
@@ -223,6 +228,11 @@ Error helper functions:
 ### Cost Reports
 - `ListCostReports`, `GetCostReport`, `CreateCostReport`, `UpdateCostReport`, `DeleteCostReport`
 
+### Annotations
+- `ListAnnotations`, `ListAllAnnotations`
+- `GetAnnotation`, `CreateAnnotation`, `UpdateAnnotation`, `DeleteAnnotation`
+- `ResolveAnnotation`, `ReopenAnnotation`
+
 ### Dashboards
 - `ListDashboards`, `ListAllDashboards`
 - `GetDashboard`, `CreateDashboard`, `UpdateDashboard`, `DeleteDashboard`
@@ -248,6 +258,19 @@ Error helper functions:
 
 ### Anomalies
 - `ListAnomalies`, `AcknowledgeAnomaly`
+
+### Savings
+- `ListSavingsItems`, `ListAllSavingsItems`, `GetSavingsItem` (read only; a finding is answered in
+  the console)
+- `ListSavingsViews`, `ListAllSavingsViews`
+- `GetSavingsView`, `CreateSavingsView`, `UpdateSavingsView`, `DeleteSavingsView`
+
+### Commitments
+- `ListCommitments`, `ListAllCommitments`
+- `GetCommitmentCoverage`
+
+### Kubernetes
+- `GetKubernetesEfficiency`
 
 ### Cost Data
 - `QueryCostData`, `GetCostSummary`

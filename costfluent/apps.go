@@ -72,7 +72,8 @@ func (c *Client) GetApp(ctx context.Context, id string) (*App, error) {
 // CreateAppInput creates a channel. Config holds recipients for email (one address, or several
 // separated by commas), webhookUrl for Slack and Teams, and url with an optional signing secret
 // for a webhook, which must be public HTTPS, and its optional events: the state changes it is sent
-// (savings_item_status, provider_health, spend_band, subscription_status, anomaly_status).
+// (savings_item_status, provider_health, spend_band, subscription_status, anomaly_status,
+// connection_imported).
 type CreateAppInput struct {
 	Key    string         `json:"key"`
 	Name   string         `json:"name"`

@@ -32,8 +32,34 @@ var contractOps = map[string]struct{ Method, Path string }{
 	"DeleteAllocationRule":   {"DELETE", "/v1/allocation/rules/{ruleId}"},
 	"GetAllocationCoverage":  {"GET", "/v1/allocation/coverage"},
 
+	"ListAnnotations":    {"GET", "/v1/annotations"},
+	"ListAllAnnotations": {"GET", "/v1/annotations"},
+	"GetAnnotation":      {"GET", "/v1/annotations/{annotationId}"},
+	"CreateAnnotation":   {"POST", "/v1/annotations"},
+	"UpdateAnnotation":   {"PUT", "/v1/annotations/{annotationId}"},
+	"ResolveAnnotation":  {"POST", "/v1/annotations/{annotationId}/resolve"},
+	"ReopenAnnotation":   {"POST", "/v1/annotations/{annotationId}/reopen"},
+	"DeleteAnnotation":   {"DELETE", "/v1/annotations/{annotationId}"},
+
 	"ListAnomalies":      {"GET", "/v1/anomalies"},
 	"AcknowledgeAnomaly": {"POST", "/v1/anomalies/{anomalyId}/acknowledge"},
+
+	"ListCommitments":       {"GET", "/v1/commitments"},
+	"ListAllCommitments":    {"GET", "/v1/commitments"},
+	"GetCommitmentCoverage": {"GET", "/v1/commitments/coverage"},
+
+	"GetKubernetesEfficiency": {"GET", "/v1/kubernetes/efficiency"},
+
+	"ListSavingsItems":    {"GET", "/v1/savings-items"},
+	"ListAllSavingsItems": {"GET", "/v1/savings-items"},
+	"GetSavingsItem":      {"GET", "/v1/savings-items/{savingsItemId}"},
+
+	"ListSavingsViews":    {"GET", "/v1/savings-views"},
+	"ListAllSavingsViews": {"GET", "/v1/savings-views"},
+	"GetSavingsView":      {"GET", "/v1/savings-views/{savingsViewId}"},
+	"CreateSavingsView":   {"POST", "/v1/savings-views"},
+	"UpdateSavingsView":   {"PUT", "/v1/savings-views/{savingsViewId}"},
+	"DeleteSavingsView":   {"DELETE", "/v1/savings-views/{savingsViewId}"},
 
 	"GetEntitlement": {"GET", "/v1/entitlement"},
 	"GetUsage":       {"GET", "/v1/usage"},
@@ -169,7 +195,10 @@ var contractOps = map[string]struct{ Method, Path string }{
 	"ListTeamWorkspaceAccess":    {"GET", "/v1/teams/{teamId}/workspaces"},
 	"ListAllTeamWorkspaceAccess": {"GET", "/v1/teams/{teamId}/workspaces"},
 	"SetTeamWorkspaceAccess":     {"PUT", "/v1/teams/{teamId}/workspaces/{workspaceId}"},
+	"SetTeamDefaultDashboard":    {"PUT", "/v1/teams/{teamId}/workspaces/{workspaceId}/default-dashboard"},
 	"RemoveTeamWorkspaceAccess":  {"DELETE", "/v1/teams/{teamId}/workspaces/{workspaceId}"},
+
+	"SubmitCosts": {"POST", "/v1/custom-providers/{providerId}/costs"},
 
 	"ListUsers":    {"GET", "/v1/users"},
 	"ListAllUsers": {"GET", "/v1/users"},
@@ -190,6 +219,7 @@ var notOperations = map[string]bool{"Workspace": true, "BaseURL": true, "Resolve
 type specSchema struct {
 	Ref        string                 `json:"$ref"`
 	Type       json.RawMessage        `json:"type"`
+	Format     string                 `json:"format"`
 	Properties map[string]*specSchema `json:"properties"`
 	Required   []string               `json:"required"`
 	Items      *specSchema            `json:"items"`
@@ -296,13 +326,18 @@ func (s *spec) resolve(sc *specSchema) *specSchema {
 		case len(sc.OneOf) == 1:
 			sc = sc.OneOf[0]
 		case len(sc.AllOf) > 0:
-			merged := &specSchema{Type: sc.Type, Properties: map[string]*specSchema{}}
+			merged := &specSchema{Type: sc.Type, Format: sc.Format, Items: sc.Items, Properties: map[string]*specSchema{}}
 			for _, part := range append(sc.AllOf, &specSchema{Properties: sc.Properties}) {
 				part = s.resolve(part)
 				for k, v := range part.Properties {
 					merged.Properties[k] = v
 				}
 				merged.Required = append(merged.Required, part.Required...)
+				// A nullable or defaulted wrapper such as allOf: [$ref: SomeEnum] has no type of its
+				// own; without the part's, its field's type would go unchecked.
+				if len(merged.Type) == 0 {
+					merged.Type, merged.Format, merged.Items = part.Type, part.Format, part.Items
+				}
 			}
 			return merged
 		default:
@@ -312,7 +347,25 @@ func (s *spec) resolve(sc *specSchema) *specSchema {
 	return nil
 }
 
-func isArray(sc *specSchema) bool { return sc != nil && strings.Contains(string(sc.Type), "array") }
+// schemaTypes reads type as a set: a 3.0 document writes one name beside nullable, a 3.1 document
+// a list such as ["integer","string"] or ["string","null"]. null is left out, since a nil pointer
+// or an omitted field carries it.
+func schemaTypes(sc *specSchema) map[string]bool {
+	set := map[string]bool{}
+	var one string
+	var many []string
+	if json.Unmarshal(sc.Type, &one) == nil {
+		set[one] = true
+	} else if json.Unmarshal(sc.Type, &many) == nil {
+		for _, name := range many {
+			set[name] = true
+		}
+	}
+	delete(set, "null")
+	return set
+}
+
+func isArray(sc *specSchema) bool { return sc != nil && schemaTypes(sc)["array"] }
 
 func jsonSchemaOf(c specContent) *specSchema {
 	if c == nil {
@@ -332,21 +385,70 @@ func successResponse(op *specOperation) (status string, schema *specSchema) {
 
 var timeType = reflect.TypeOf(time.Time{})
 
-// checkFields fails for every json field of typ, recursively, that the schema does not declare.
-func (s *spec) checkFields(t *testing.T, where string, typ reflect.Type, sc *specSchema) {
-	t.Helper()
+// reporter is the part of testing.T the checker uses, so a test can collect what it reports.
+type reporter interface {
+	Helper()
+	Errorf(format string, args ...any)
+}
+
+// wrongKind says why values of typ cannot be the schema's, or returns "" when they can or the
+// schema names no type.
+func wrongKind(typ reflect.Type, sc *specSchema) string {
+	types := schemaTypes(sc)
+	if len(types) == 0 {
+		return ""
+	}
+	if typ == timeType {
+		if types["string"] && sc.Format == "date-time" {
+			return ""
+		}
+		return fmt.Sprintf("%s decodes only a date-time string, the schema is type %s format %q", typ, sc.Type, sc.Format)
+	}
+	var want string
+	switch typ.Kind() {
+	case reflect.String:
+		want = "string"
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		want = "integer"
+	case reflect.Float32, reflect.Float64:
+		want = "number"
+	case reflect.Bool:
+		want = "boolean"
+	case reflect.Struct, reflect.Map:
+		want = "object"
+	default:
+		return ""
+	}
+	if types[want] {
+		return ""
+	}
+	return fmt.Sprintf("%s is a json %s, the schema is type %s format %q", typ, want, sc.Type, sc.Format)
+}
+
+// checkFields fails for every json field of typ, recursively, that the schema does not declare or
+// whose Go type cannot hold the schema's values.
+func (s *spec) checkFields(r reporter, where string, typ reflect.Type, sc *specSchema) {
+	r.Helper()
 	sc = s.resolve(sc)
 	for typ.Kind() == reflect.Pointer || typ.Kind() == reflect.Slice {
 		if typ.Kind() == reflect.Slice {
 			if !isArray(sc) {
-				t.Errorf("%s: %s is a list, the schema is not", where, typ)
+				r.Errorf("%s: %s is a list, the schema is not", where, typ)
 				return
 			}
 			sc = s.resolve(sc.Items)
 		}
 		typ = typ.Elem()
 	}
-	if typ.Kind() != reflect.Struct || typ == timeType || sc == nil {
+	if sc == nil {
+		return
+	}
+	if msg := wrongKind(typ, sc); msg != "" {
+		r.Errorf("%s: %s", where, msg)
+		return
+	}
+	if typ.Kind() != reflect.Struct || typ == timeType {
 		return
 	}
 	pair := checkedPair{typ, sc}
@@ -354,16 +456,16 @@ func (s *spec) checkFields(t *testing.T, where string, typ reflect.Type, sc *spe
 		return
 	}
 	s.checked[pair] = true
-	s.checkStruct(t, where, typ, sc)
+	s.checkStruct(r, where, typ, sc)
 }
 
-func (s *spec) checkStruct(t *testing.T, where string, typ reflect.Type, sc *specSchema) {
-	t.Helper()
+func (s *spec) checkStruct(r reporter, where string, typ reflect.Type, sc *specSchema) {
+	r.Helper()
 	for i := 0; i < typ.NumField(); i++ {
 		f := typ.Field(i)
 		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
 		if f.Anonymous && name == "" {
-			s.checkStruct(t, where, f.Type, sc)
+			s.checkStruct(r, where, f.Type, sc)
 			continue
 		}
 		if !f.IsExported() || name == "-" || name == "" {
@@ -371,10 +473,10 @@ func (s *spec) checkStruct(t *testing.T, where string, typ reflect.Type, sc *spe
 		}
 		prop, ok := sc.Properties[name]
 		if !ok {
-			t.Errorf("%s: %s.%s is json %q, which the schema does not declare", where, typ.Name(), f.Name, name)
+			r.Errorf("%s: %s.%s is json %q, which the schema does not declare", where, typ.Name(), f.Name, name)
 			continue
 		}
-		s.checkFields(t, where+"."+name, f.Type, prop)
+		s.checkFields(r, where+"."+name, f.Type, prop)
 	}
 }
 
@@ -416,9 +518,55 @@ func (rec *recorder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(`{"id":"id-1"}`))
 }
 
-// call invokes a client method with placeholder arguments: a string for every ID and a zero value
-// for every input, and no request options.
-func call(ctx context.Context, m reflect.Value) []reflect.Value {
+// fixedTime is the instant a filled input carries wherever it takes a time.
+var fixedTime = time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+
+// filled returns a typ with every exported field set: "1" for a string, so a Decimal holds a valid
+// amount too, true, 1, fixedTime, and one element in each slice and map. depth stops a recursive
+// type such as a folder's children.
+func filled(typ reflect.Type, depth int) reflect.Value {
+	v := reflect.New(typ).Elem()
+	if depth == 0 {
+		return v
+	}
+	if typ == timeType {
+		v.Set(reflect.ValueOf(fixedTime))
+		return v
+	}
+	switch typ.Kind() {
+	case reflect.String:
+		v.SetString("1")
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		v.SetInt(1)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		v.SetUint(1)
+	case reflect.Float32, reflect.Float64:
+		v.SetFloat(1)
+	case reflect.Bool:
+		v.SetBool(true)
+	case reflect.Pointer:
+		p := reflect.New(typ.Elem())
+		p.Elem().Set(filled(typ.Elem(), depth-1))
+		v.Set(p)
+	case reflect.Slice:
+		v.Set(reflect.Append(v, filled(typ.Elem(), depth-1)))
+	case reflect.Map:
+		m := reflect.MakeMap(typ)
+		m.SetMapIndex(filled(typ.Key(), depth-1), filled(typ.Elem(), depth-1))
+		v.Set(m)
+	case reflect.Struct:
+		for i := 0; i < typ.NumField(); i++ {
+			if typ.Field(i).IsExported() {
+				v.Field(i).Set(filled(typ.Field(i).Type, depth-1))
+			}
+		}
+	}
+	return v
+}
+
+// call invokes a client method with placeholder arguments: a string for every ID, and for every
+// input a zero value, or a filled one when fill is set; no request options.
+func call(ctx context.Context, m reflect.Value, fill bool) []reflect.Value {
 	ctxType := reflect.TypeOf((*context.Context)(nil)).Elem()
 	n := m.Type().NumIn()
 	if m.Type().IsVariadic() {
@@ -432,6 +580,8 @@ func call(ctx context.Context, m reflect.Value) []reflect.Value {
 			args[i] = reflect.ValueOf(ctx)
 		case in.Kind() == reflect.String:
 			args[i] = reflect.ValueOf("arg-1").Convert(in)
+		case fill:
+			args[i] = filled(in, 4)
 		case in.Kind() == reflect.Pointer && in.Elem().Kind() == reflect.Struct:
 			args[i] = reflect.New(in.Elem())
 		default:
@@ -441,33 +591,44 @@ func call(ctx context.Context, m reflect.Value) []reflect.Value {
 	return m.Call(args)
 }
 
-func TestClientMatchesPublicAPI(t *testing.T) {
-	s := loadSpec(t)
+func contractMethods() []string {
 	names := make([]string, 0, len(contractOps))
 	for name := range contractOps {
 		names = append(names, name)
 	}
 	sort.Strings(names)
+	return names
+}
 
-	for _, name := range names {
+// exercise calls the client method name against a recorder of s, and fails unless the call succeeds
+// and sends a request.
+func exercise(t *testing.T, s *spec, name string, fill bool) (*recorder, reflect.Value) {
+	t.Helper()
+	rec := &recorder{spec: s}
+	srv := httptest.NewServer(rec)
+	t.Cleanup(srv.Close)
+	client := NewClient(WithBaseURL(srv.URL), WithAPIKey("key"), WithWorkspace("ws-default"))
+
+	m := reflect.ValueOf(client).MethodByName(name)
+	if !m.IsValid() {
+		t.Fatalf("client has no method %s", name)
+	}
+	out := call(context.Background(), m, fill)
+	if err, _ := out[len(out)-1].Interface().(error); err != nil {
+		t.Fatalf("call failed: %v", err)
+	}
+	if len(rec.got) == 0 {
+		t.Fatal("sent no request")
+	}
+	return rec, m
+}
+
+func TestClientMatchesPublicAPI(t *testing.T) {
+	s := loadSpec(t)
+	for _, name := range contractMethods() {
 		want := contractOps[name]
 		t.Run(name, func(t *testing.T) {
-			rec := &recorder{spec: s}
-			srv := httptest.NewServer(rec)
-			defer srv.Close()
-			client := NewClient(WithBaseURL(srv.URL), WithAPIKey("key"), WithWorkspace("ws-default"))
-
-			m := reflect.ValueOf(client).MethodByName(name)
-			if !m.IsValid() {
-				t.Fatalf("client has no method %s", name)
-			}
-			out := call(context.Background(), m)
-			if err, _ := out[len(out)-1].Interface().(error); err != nil {
-				t.Fatalf("call failed: %v", err)
-			}
-			if len(rec.got) == 0 {
-				t.Fatal("sent no request")
-			}
+			rec, m := exercise(t, s, name, false)
 
 			first := s.match(rec.got[0].method, rec.got[0].path)
 			if first == nil || first.method != want.Method || first.template != want.Path {
@@ -504,6 +665,24 @@ func TestClientMatchesPublicAPI(t *testing.T) {
 					resp = resp.Properties["data"]
 				}
 				s.checkFields(t, "response", ret, resp)
+			}
+		})
+	}
+}
+
+// A zero input sends no optional query parameter, so a filter the client and the spec spell
+// differently passes the pass above and is silently ignored by the API.
+func TestClientOptionalParametersMatchPublicAPI(t *testing.T) {
+	s := loadSpec(t)
+	for _, name := range contractMethods() {
+		t.Run(name, func(t *testing.T) {
+			rec, _ := exercise(t, s, name, true)
+			for _, got := range rec.got {
+				rt := s.match(got.method, got.path)
+				if rt == nil {
+					t.Fatalf("%s %s is not a Public API operation", got.method, got.path)
+				}
+				s.checkRequest(t, rt, got)
 			}
 		})
 	}
@@ -549,6 +728,64 @@ func (s *spec) checkRequest(t *testing.T, rt *route, got recorded) {
 		if key == "workspaceId" && len(sent[key]) == 0 {
 			t.Errorf("%s: body is missing required workspaceId", where)
 		}
+	}
+}
+
+// collected is a reporter that keeps what the checker reports instead of failing a test.
+type collected []string
+
+func (c *collected) Helper() {}
+
+func (c *collected) Errorf(format string, args ...any) { *c = append(*c, fmt.Sprintf(format, args...)) }
+
+func TestContractCheckerRefusesAWrongType(t *testing.T) {
+	components := `{
+		"Amount": {"type": "string", "format": "decimal"},
+		"Status": {"type": "string", "enum": ["active", "paused"]}
+	}`
+	tests := []struct {
+		name    string
+		goType  reflect.Type
+		schema  string
+		refused bool
+	}{
+		{"int against a string", reflect.TypeOf(0), `{"type": "string"}`, true},
+		{"float64 against a decimal string", reflect.TypeOf(0.0), `{"type": "string", "format": "decimal"}`, true},
+		{"float64 against a referenced decimal", reflect.TypeOf(0.0), `{"$ref": "#/components/schemas/Amount"}`, true},
+		{"time.Time against a date", timeType, `{"type": "string", "format": "date"}`, true},
+		{"string against an integer", reflect.TypeOf(""), `{"type": "integer", "format": "int32"}`, true},
+		{"Decimal against a number", reflect.TypeOf(Decimal("")), `{"type": "number", "format": "double"}`, true},
+		{"bool against a string", reflect.TypeOf(false), `{"type": "string"}`, true},
+		{"map against a string", reflect.TypeOf(map[string]string{}), `{"type": "string"}`, true},
+		{"int against a nullable enum wrapper", reflect.TypeOf(0), `{"allOf": [{"$ref": "#/components/schemas/Status"}], "nullable": true}`, true},
+		{"int against a nullable string list", reflect.TypeOf(new(int)), `{"type": ["string", "null"]}`, true},
+
+		{"int against an integer or string union", reflect.TypeOf(0), `{"type": ["integer", "string"], "format": "int32"}`, false},
+		{"string pointer against a nullable string list", reflect.TypeOf(new(string)), `{"type": ["string", "null"]}`, false},
+		{"string pointer against a nullable string", reflect.TypeOf(new(string)), `{"type": "string", "nullable": true}`, false},
+		{"Decimal against a referenced decimal", reflect.TypeOf(Decimal("")), `{"$ref": "#/components/schemas/Amount"}`, false},
+		{"string against a nullable enum wrapper", reflect.TypeOf(""), `{"allOf": [{"$ref": "#/components/schemas/Status"}], "nullable": true}`, false},
+		{"time.Time against a date-time", timeType, `{"type": "string", "format": "date-time"}`, false},
+		{"float64 against a number", reflect.TypeOf(0.0), `{"type": "number", "format": "double"}`, false},
+		{"map against an object", reflect.TypeOf(map[string]string{}), `{"type": "object"}`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &spec{checked: map[checkedPair]bool{}}
+			if err := json.Unmarshal([]byte(components), &s.Components.Schemas); err != nil {
+				t.Fatal(err)
+			}
+			prop := &specSchema{}
+			if err := json.Unmarshal([]byte(tt.schema), prop); err != nil {
+				t.Fatal(err)
+			}
+			typ := reflect.StructOf([]reflect.StructField{{Name: "Field", Type: tt.goType, Tag: `json:"field"`}})
+			var errs collected
+			s.checkFields(&errs, "response", typ, &specSchema{Type: json.RawMessage(`"object"`), Properties: map[string]*specSchema{"field": prop}})
+			if refused := len(errs) > 0; refused != tt.refused {
+				t.Errorf("refused = %v, want %v; reported %q", refused, tt.refused, errs)
+			}
+		})
 	}
 }
 

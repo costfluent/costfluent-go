@@ -196,3 +196,11 @@ func TestDeleteDashboardWidgetAndAMissingOneIsNotFound(t *testing.T) {
 		t.Fatalf("err = %v, want not found", err)
 	}
 }
+
+func TestWidgetTypesMatchTheContract(t *testing.T) {
+	wantContractValues(t, "WidgetType", []string{WidgetTypeCostReport, WidgetTypeText})
+}
+
+func TestWidgetDisplaysMatchTheContract(t *testing.T) {
+	wantContractValues(t, "WidgetDisplay", []string{WidgetDisplayChart, WidgetDisplayTable, WidgetDisplayKPI})
+}

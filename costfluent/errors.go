@@ -75,6 +75,12 @@ func (e *APIError) Message() string {
 	return http.StatusText(e.StatusCode)
 }
 
+// RetryAfter is how long the API asked the caller to wait before trying again, from the Retry-After
+// or RateLimit-Reset of a 429; zero when the response was not a 429 or named no wait.
+func (e *APIError) RetryAfter() time.Duration {
+	return e.retryAfter
+}
+
 func (e *APIError) Error() string {
 	msg := fmt.Sprintf("costfluent: %s (%d)", e.Message(), e.StatusCode)
 	if e.TraceID != "" {

@@ -75,6 +75,17 @@ func WithDebug(debug bool) Option {
 	}
 }
 
+// WithMaxRetryAfter sets the longest wait the API asks for in Retry-After or RateLimit-Reset that the
+// client waits out before trying again; a request asked to wait longer fails at once with the API's
+// answer, whose RetryAfter says how long. By default the client waits out up to 60 seconds. Zero or
+// less waits out none, for a caller answering someone who can be told when to come back instead.
+// It changes no retry of a server or connection error.
+func WithMaxRetryAfter(d time.Duration) Option {
+	return func(c *Client) {
+		c.maxRetryAfter = &d
+	}
+}
+
 // WithTimeout bounds each attempt of a request, overriding the timeout a WithHTTPClient client carries
 func WithTimeout(d time.Duration) Option {
 	return func(c *Client) {

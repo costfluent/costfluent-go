@@ -259,6 +259,89 @@ func TestUpdateBudgetPeriods(t *testing.T) {
 	}
 }
 
+// An update replaces the thresholds only when it names them, sending each with its basis, and
+// decodes them back in the API's order: spend thresholds lowest first, then forecast ones.
+func TestUpdateBudgetAlerts(t *testing.T) {
+	c, got := testClient(t,
+		stub{200, `{"id":"bdg_1","alerts":[{"thresholdPercent":80,"basis":"actual","isTriggered":true}]}`},
+		stub{200, `{"id":"bdg_1","alerts":[{"thresholdPercent":80,"basis":"actual","appIds":["app_1"],"isTriggered":true,"triggeredAt":"2026-10-20T08:00:00Z"},
+			{"thresholdPercent":90,"basis":"forecast","appIds":["app_1"],"isTriggered":false}]}`},
+	)
+	name := "Renamed"
+	alerts := []BudgetAlertInput{{ThresholdPercent: 80}, {ThresholdPercent: 90, Basis: BudgetAlertBasisForecast}}
+
+	if _, err := c.UpdateBudget(context.Background(), "bdg_1", &UpdateBudgetInput{Name: &name}); err != nil {
+		t.Fatal(err)
+	}
+	budget, err := c.UpdateBudget(context.Background(), "bdg_1", &UpdateBudgetInput{Alerts: &alerts})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, present := (*got)[0].Body["alerts"]; present {
+		t.Errorf("an update without thresholds sent alerts = %v", (*got)[0].Body["alerts"])
+	}
+	sent, ok := (*got)[1].Body["alerts"].([]any)
+	if !ok || len(sent) != 2 || len((*got)[1].Body) != 1 {
+		t.Fatalf("replacing sent %v, want the two thresholds alone", (*got)[1].Body)
+	}
+	if first := sent[0].(map[string]any); first["thresholdPercent"] != float64(80) || len(first) != 1 {
+		t.Errorf("a threshold without a basis sent %v, want its percent alone", first)
+	}
+	if second := sent[1].(map[string]any); second["thresholdPercent"] != float64(90) || second["basis"] != "forecast" {
+		t.Errorf("a forecast threshold sent %v", second)
+	}
+	if len(budget.Alerts) != 2 ||
+		budget.Alerts[0].ThresholdPercent != 80 || budget.Alerts[0].Basis != BudgetAlertBasisActual ||
+		!budget.Alerts[0].IsTriggered || budget.Alerts[0].TriggeredAt == nil ||
+		budget.Alerts[1].ThresholdPercent != 90 || budget.Alerts[1].Basis != BudgetAlertBasisForecast ||
+		budget.Alerts[1].IsTriggered || len(budget.Alerts[1].AppIDs) != 1 {
+		t.Fatalf("decoded alerts %+v", budget.Alerts)
+	}
+}
+
+// A threshold's basis is sent only when set, so the API's default of spend applies, and decodes on
+// every alert; written again, as the MCP server does, each alert keeps its basis.
+func TestBudgetAlertBasis(t *testing.T) {
+	c, got := testClient(t, stub{201, `{"id":"bdg_1","alerts":[{"thresholdPercent":50,"basis":"actual","isTriggered":false},
+		{"thresholdPercent":100,"basis":"actual","isTriggered":false},{"thresholdPercent":100,"basis":"forecast","isTriggered":false}]}`})
+	amount := Decimal("1000")
+
+	budget, err := c.CreateBudget(context.Background(), &CreateBudgetInput{
+		Name: "Cloud", Amount: &amount, Currency: "EUR",
+		Alerts: []BudgetAlertInput{
+			{ThresholdPercent: 50},
+			{ThresholdPercent: 100, Basis: BudgetAlertBasisActual},
+			{ThresholdPercent: 100, Basis: BudgetAlertBasisForecast},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sent, ok := (*got)[0].Body["alerts"].([]any)
+	if !ok || len(sent) != 3 {
+		t.Fatalf("body alerts = %v", (*got)[0].Body["alerts"])
+	}
+	for i, want := range []any{nil, "actual", "forecast"} {
+		if basis := sent[i].(map[string]any)["basis"]; basis != want {
+			t.Errorf("threshold %d sent basis %v, want %v", i, basis, want)
+		}
+	}
+	if len(budget.Alerts) != 3 || budget.Alerts[0].Basis != BudgetAlertBasisActual ||
+		budget.Alerts[1].Basis != BudgetAlertBasisActual || budget.Alerts[2].Basis != BudgetAlertBasisForecast ||
+		budget.Alerts[2].ThresholdPercent != 100 {
+		t.Fatalf("decoded alerts %+v", budget.Alerts)
+	}
+	out, err := json.Marshal(budget.Alerts[2])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `"basis":"forecast"`) {
+		t.Errorf("written as %s, want its basis", out)
+	}
+}
+
 // A read hands back the budget's ETag, and an update sending it applies only while the budget is
 // unchanged: the second writer working from the same read gets IsPreconditionFailed. Without
 // IfMatch the last write wins.
@@ -384,4 +467,8 @@ func TestGetBudgetDecodesUnconvertedAndHistoryFloor(t *testing.T) {
 	if len(budget.Unconverted) != 0 || budget.HistoryFloor != nil {
 		t.Errorf("a body without them decoded as unconverted %+v, history floor %v", budget.Unconverted, budget.HistoryFloor)
 	}
+}
+
+func TestBudgetAlertBasesMatchTheContract(t *testing.T) {
+	wantContractValues(t, "BudgetAlertBasis", []string{BudgetAlertBasisActual, BudgetAlertBasisForecast})
 }

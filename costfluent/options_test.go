@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -465,5 +466,82 @@ func TestWithBaseURLAcceptsHTTPSAndLoopbackHTTP(t *testing.T) {
 		if err := checkBaseURL(base); err != nil {
 			t.Errorf("%s: %v", base, err)
 		}
+	}
+}
+
+// rateLimitedOnce answers the first request 429 with retryAfter and every later one 200.
+func rateLimitedOnce(t *testing.T, retryAfter string, calls *atomic.Int32) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if calls.Add(1) == 1 {
+			w.Header().Set("Retry-After", retryAfter)
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = io.WriteString(w, `{"status":429,"title":"Too many requests","retryable":true}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"id":"ws_1","name":"Production"}`)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestWithMaxRetryAfterZeroReturnsARateLimitAtOnceWithItsWait(t *testing.T) {
+	var calls atomic.Int32
+	srv := rateLimitedOnce(t, "2", &calls)
+	c := NewClient(WithBaseURL(srv.URL), WithMaxRetryAfter(0))
+	slept := recordSleeps(c)
+
+	_, err := c.GetWorkspace(context.Background(), "ws_1")
+	var ae *APIError
+	if !errors.As(err, &ae) || !IsRateLimited(err) {
+		t.Fatalf("err = %v, want the 429", err)
+	}
+	if calls.Load() != 1 || len(slept.all()) != 0 {
+		t.Errorf("sent %d times and waited %v, want one attempt and no wait", calls.Load(), slept.all())
+	}
+	if ae.RetryAfter() != 2*time.Second {
+		t.Errorf("RetryAfter() = %s, want the 2s the API asked for", ae.RetryAfter())
+	}
+}
+
+func TestWithMaxRetryAfterZeroStillRetriesAServerError(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if calls.Add(1) == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = io.WriteString(w, `{"status":503,"title":"Unavailable","retryable":true}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"id":"ws_1","name":"Production"}`)
+	}))
+	t.Cleanup(srv.Close)
+	c := NewClient(WithBaseURL(srv.URL), WithMaxRetryAfter(0))
+	recordSleeps(c)
+
+	if _, err := c.GetWorkspace(context.Background(), "ws_1"); err != nil || calls.Load() != 2 {
+		t.Fatalf("err %v after %d attempts, want the backoff retry to succeed on the second", err, calls.Load())
+	}
+}
+
+func TestWithMaxRetryAfterWaitsOutOnlyWhatItAllows(t *testing.T) {
+	var calls atomic.Int32
+	srv := rateLimitedOnce(t, "2", &calls)
+	c := NewClient(WithBaseURL(srv.URL), WithMaxRetryAfter(5*time.Second))
+	slept := recordSleeps(c)
+	if _, err := c.GetWorkspace(context.Background(), "ws_1"); err != nil {
+		t.Fatalf("a 2s wait under a 5s bound: %v", err)
+	}
+	if waits := slept.all(); len(waits) != 1 || waits[0] != 2*time.Second {
+		t.Errorf("waited %v, want the 2s asked for", waits)
+	}
+
+	var longer atomic.Int32
+	srv = rateLimitedOnce(t, "10", &longer)
+	c = NewClient(WithBaseURL(srv.URL), WithMaxRetryAfter(5*time.Second))
+	slept = recordSleeps(c)
+	if _, err := c.GetWorkspace(context.Background(), "ws_1"); !IsRateLimited(err) || longer.Load() != 1 || len(slept.all()) != 0 {
+		t.Errorf("a 10s wait over a 5s bound: err %v after %d attempts, waited %v; want the 429 at once", err, longer.Load(), slept.all())
 	}
 }

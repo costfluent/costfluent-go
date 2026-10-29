@@ -12,7 +12,7 @@ type Provider struct {
 	ID                   string         `json:"id"`
 	Type                 string         `json:"type"`
 	Key                  ProviderKey    `json:"key"`
-	Name                 string         `json:"name"`
+	DisplayName          string         `json:"displayName"`
 	Description          *string        `json:"description,omitempty"`
 	Status               ProviderStatus `json:"status"`
 	ParentProviderID     *string        `json:"parentProviderId,omitempty"`
@@ -33,10 +33,10 @@ func (p *Provider) setETag(etag string) { p.ETag = etag }
 
 // ProviderCreated is what connecting a provider returns; read the full Provider with GetProvider.
 type ProviderCreated struct {
-	ID   string      `json:"id"`
-	Type string      `json:"type"`
-	Key  ProviderKey `json:"key"`
-	Name string      `json:"name"`
+	ID          string      `json:"id"`
+	Type        string      `json:"type"`
+	Key         ProviderKey `json:"key"`
+	DisplayName string      `json:"displayName"`
 	// ETag is the version the connection was created at, to send back with IfMatch.
 	ETag string `json:"-"`
 }
@@ -86,7 +86,7 @@ func (c *Client) GetProvider(ctx context.Context, id string) (*Provider, error) 
 // CreateProviderInput for connecting a new provider
 type CreateProviderInput struct {
 	Key                  ProviderKey       `json:"key"`
-	Name                 string            `json:"name,omitempty"`
+	DisplayName          string            `json:"displayName,omitempty"`
 	Description          *string           `json:"description,omitempty"`
 	ParentProviderID     *string           `json:"parentProviderId,omitempty"`
 	ExternalID           *string           `json:"externalId,omitempty"`
@@ -156,11 +156,11 @@ func (c *Client) GetAwsConnector(ctx context.Context) (*AwsConnector, error) {
 	return &connector, nil
 }
 
-// UpdateProviderInput for updating a provider in place. A nil or false field keeps its value: the
-// name renames the connection, which keeps its id and the costs it has collected, and
+// UpdateProviderInput for updating a provider in place. A nil or false field keeps its value:
+// DisplayName renames the connection, which keeps its id and the costs it has collected, and
 // ClearDescription and ClearSettings remove theirs. A non-empty Settings map replaces the settings.
 type UpdateProviderInput struct {
-	Name                 *string           `json:"name,omitempty"`
+	DisplayName          *string           `json:"displayName,omitempty"`
 	Description          *string           `json:"description,omitempty"`
 	ClearDescription     bool              `json:"clearDescription,omitempty"`
 	ExternalID           *string           `json:"externalId,omitempty"`

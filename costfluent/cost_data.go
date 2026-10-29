@@ -61,6 +61,17 @@ const (
 	MeasureCount = "count"
 )
 
+// The calculations a cost report draws its business metric with. UnitCostPerUnit divides each
+// bin's figure in the report's measure, cost or usage, by the metric's amount; UnitCostGrossMargin
+// is (revenue - cost) / revenue as a fraction, 0.4 for 40%, on the cost measure and a metric whose
+// unit is the costs' currency code; UnitCostMetricValue is the metric's summed amount itself, on
+// any measure. More values may be added.
+const (
+	UnitCostPerUnit     = "perUnit"
+	UnitCostGrossMargin = "grossMargin"
+	UnitCostMetricValue = "metricValue"
+)
+
 // The periods a cost data query bins its rows into. GranularityCumulative is daily points that each
 // carry the window's running total, so the last is the window's total.
 const (
@@ -70,6 +81,28 @@ const (
 	GranularityQuarter    = "quarter"
 	GranularityCumulative = "cumulative"
 )
+
+// CommitmentDiscountPlacement is how a cost read's amortized figures place commitment discounts,
+// spelled as the Public API sends it: AsApplied on the usage the provider applied each to, Blended
+// with each day's AWS Savings Plan and Reserved Instance discount spread evenly across the usage it
+// could cover, which a read of a workspace with BlendCommitmentDiscounts on states. Billed figures
+// are never spread. A new placement may appear, so a client should tolerate one it does not list.
+// TestCommitmentDiscountPlacementsMatchTheContract holds this list to the API's declared values.
+type CommitmentDiscountPlacement string
+
+const (
+	CommitmentDiscountPlacementAsApplied CommitmentDiscountPlacement = "asApplied"
+	CommitmentDiscountPlacementBlended   CommitmentDiscountPlacement = "blended"
+)
+
+// CommitmentDiscountPlacements returns every placement the Public API declares, in the contract's
+// order.
+func CommitmentDiscountPlacements() []CommitmentDiscountPlacement {
+	return []CommitmentDiscountPlacement{
+		CommitmentDiscountPlacementAsApplied,
+		CommitmentDiscountPlacementBlended,
+	}
+}
 
 // CostDataQuery reads cost over time. Granularity is one of the Granularity constants
 // (GranularityDay when empty), and the answer's Meta.Granularity names it the same way. GroupBy
@@ -121,6 +154,9 @@ type CostDataMeta struct {
 	TotalCost    Decimal               `json:"totalCost"`
 	Currency     string                `json:"currency"`
 	Presentation *CurrencyPresentation `json:"presentation,omitempty"`
+
+	// CommitmentDiscounts is how the amortized figures placed commitment discounts.
+	CommitmentDiscounts CommitmentDiscountPlacement `json:"commitmentDiscounts"`
 
 	// HistoryFloor is the earliest day the organization's plan lets it read, when the plan
 	// limits history.
@@ -198,11 +234,13 @@ type CostSummary struct {
 	CostChange Decimal `json:"costChange"`
 	// CostChangePercent is nil, like an unset CostChange, when the previous window was not
 	// compared, so it never reads as no change.
-	CostChangePercent *float64                `json:"costChangePercent"`
-	Presentation      *CurrencyPresentation   `json:"presentation,omitempty"`
-	TopServices       []ServiceCostBreakdown  `json:"topServices,omitempty"`
-	ByProvider        []ProviderCostBreakdown `json:"byProvider,omitempty"`
-	HistoryFloor      *string                 `json:"historyFloor,omitempty"`
+	CostChangePercent *float64              `json:"costChangePercent"`
+	Presentation      *CurrencyPresentation `json:"presentation,omitempty"`
+	// CommitmentDiscounts is as on CostDataMeta.
+	CommitmentDiscounts CommitmentDiscountPlacement `json:"commitmentDiscounts"`
+	TopServices         []ServiceCostBreakdown      `json:"topServices,omitempty"`
+	ByProvider          []ProviderCostBreakdown     `json:"byProvider,omitempty"`
+	HistoryFloor        *string                     `json:"historyFloor,omitempty"`
 	// DataThrough is as on CostDataMeta.
 	DataThrough *string `json:"dataThrough,omitempty"`
 	// ComparedThrough is the settled day CostChange and CostChangePercent compare through when the
