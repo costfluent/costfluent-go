@@ -73,6 +73,14 @@ func TestReadsOfVersionedResourcesKeepTheirETag(t *testing.T) {
 			r, err := c.GetSavedFilter(ctx, "", "f")
 			return etagOf(r, err)
 		},
+		"savings view": func(c *Client) (string, error) {
+			r, err := c.GetSavingsView(ctx, "", "v")
+			return etagOf(r, err)
+		},
+		"created savings view": func(c *Client) (string, error) {
+			r, err := c.CreateSavingsView(ctx, &CreateSavingsViewInput{Title: "v", Tab: "toReview"})
+			return etagOf(r, err)
+		},
 		"team": func(c *Client) (string, error) { r, err := c.GetTeam(ctx, "t"); return etagOf(r, err) },
 		"virtual tag": func(c *Client) (string, error) {
 			r, err := c.GetVirtualTag(ctx, "", "v")
@@ -194,6 +202,11 @@ func TestWritesOfVersionedResourcesSendIfMatch(t *testing.T) {
 			return err
 		},
 		"delete saved filter": func(c *Client, o ...RequestOption) error { return c.DeleteSavedFilter(ctx, "", "f", o...) },
+		"update savings view": func(c *Client, o ...RequestOption) error {
+			_, err := c.UpdateSavingsView(ctx, "", "v", &UpdateSavingsViewInput{Title: "v", Tab: "toReview"}, o...)
+			return err
+		},
+		"delete savings view": func(c *Client, o ...RequestOption) error { return c.DeleteSavingsView(ctx, "", "v", o...) },
 		"update team": func(c *Client, o ...RequestOption) error {
 			_, err := c.UpdateTeam(ctx, "t", &UpdateTeamInput{}, o...)
 			return err

@@ -11,11 +11,14 @@ import (
 type Anomaly struct {
 	ID string `json:"id"`
 	// WorkspaceID is the workspace whose cost the anomaly is in; a provider in two workspaces has an anomaly in each
-	WorkspaceID      string  `json:"workspaceId"`
-	ProviderID       string  `json:"providerId"`
-	AnomalyDate      string  `json:"anomalyDate"`
-	ServiceName      string  `json:"serviceName"`
-	Region           *string `json:"region,omitempty"`
+	WorkspaceID string `json:"workspaceId"`
+	ProviderID  string `json:"providerId"`
+	AnomalyDate string `json:"anomalyDate"`
+	ServiceName string `json:"serviceName"`
+	// Region is the region with more than half the increase; for new_spend, the new region with more than half the new spend
+	Region *string `json:"region,omitempty"`
+	// AnomalyType is spike, a day well above its 30-day baseline, or new_spend, a service or a region of one first billed
+	// within the seven days up to the anomaly's date after none in the 95 days before it; read any other value as an anomaly
 	AnomalyType      string  `json:"anomalyType"`
 	Severity         string  `json:"severity"`
 	ExpectedCost     Decimal `json:"expectedCost"`
@@ -32,6 +35,28 @@ type Anomaly struct {
 	IsAcknowledged bool       `json:"isAcknowledged"`
 	AcknowledgedAt *time.Time `json:"acknowledgedAt,omitempty"`
 	DetectedAt     time.Time  `json:"detectedAt"`
+	// AttributedResourceID is the resource with more than half the increase
+	AttributedResourceID *string `json:"attributedResourceId,omitempty"`
+	// Contributors are the resources that added most to the increase, largest first, at most three
+	Contributors []AnomalyContributor `json:"contributors"`
+	// AttributedSku is the SKU with more than half the increase, named as a cost report's SKU grouping names it
+	AttributedSku *string `json:"attributedSku,omitempty"`
+	// SkuContributors are the SKUs that added most to the increase, largest first, at most three
+	SkuContributors []AnomalySkuContributor `json:"skuContributors"`
+}
+
+// AnomalyContributor is one resource's part of an anomaly's increase, in the anomaly's currency
+type AnomalyContributor struct {
+	// AccountID is the account the resource is billed to; nil when the provider names none
+	AccountID  *string `json:"accountId,omitempty"`
+	ResourceID string  `json:"resourceId"`
+	Increase   Decimal `json:"increase"`
+}
+
+// AnomalySkuContributor is one SKU's part of an anomaly's increase, in the anomaly's currency
+type AnomalySkuContributor struct {
+	Sku      string  `json:"sku"`
+	Increase Decimal `json:"increase"`
 }
 
 // AnomalyList is one page of the anomalies that match, newest first

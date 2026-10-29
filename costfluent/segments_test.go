@@ -134,3 +134,7 @@ func TestUpdateSharedSegmentLabelAndSplit(t *testing.T) {
 		t.Fatalf("decoded %+v", proportional)
 	}
 }
+
+func TestSegmentSplitMethodsMatchTheContract(t *testing.T) {
+	wantContractValues(t, "SegmentSplitMethod", []string{SegmentSplitProportional, SegmentSplitEven, SegmentSplitPercent})
+}

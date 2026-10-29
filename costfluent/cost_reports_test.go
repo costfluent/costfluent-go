@@ -29,6 +29,36 @@ func TestCreateCostReportReadsItBack(t *testing.T) {
 	}
 }
 
+func TestCostReportChartAxisIsSentAndRead(t *testing.T) {
+	c, got := testClient(t,
+		stub{200, `{"id":"rpt_1"}`},
+		stub{200, `{"id":"rpt_1","chartType":"bar","chartAxis":"group","groupBy":[]}`},
+		stub{200, `{"id":"rpt_1","chartType":"line","chartAxis":"date","groupBy":[]}`},
+	)
+
+	created, err := c.CreateCostReport(context.Background(), &CreateCostReportInput{
+		WorkspaceID: "ws_1", Title: "Side by side", ChartType: ptr("bar"), ChartAxis: ptr("group"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantBody(t, (*got)[0], "chartAxis", "group")
+	if created.ChartAxis != "group" {
+		t.Fatalf("decoded %+v", created)
+	}
+
+	updated, err := c.UpdateCostReport(context.Background(), "ws_1", "rpt_1", &UpdateCostReportInput{ChartType: ptr("line")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, sent := (*got)[2].Body["chartAxis"]; sent {
+		t.Error("sent chartAxis although the update left it out")
+	}
+	if updated.ChartAxis != "date" {
+		t.Fatalf("decoded %+v", updated)
+	}
+}
+
 func TestCreateCostReportFallsBackToTheDefaultWorkspace(t *testing.T) {
 	c, got := testClient(t, stub{200, `{"id":"rpt_1"}`}, stub{200, `{"id":"rpt_1","title":"Monthly"}`})
 	input := &CreateCostReportInput{Title: "Monthly"}
@@ -182,6 +212,29 @@ func TestGetCostReportDataReadsTheReportsNumbers(t *testing.T) {
 	}
 }
 
+func TestGetCostReportDataReadsEachGroupsComparison(t *testing.T) {
+	c, _ := testClient(t, stub{200, `{"summary":{"previousPeriodCost":"9.00000000","comparedCost":"11.00000000"},"series":[],
+		"breakdown":[{"keys":["AmazonEC2"],"cost":"12.50000000","percent":100,"previousCost":"8.00000000","comparedCost":"11.00000000","changePercent":37.5},
+		{"keys":[],"isOther":true,"cost":"0.00000000","percent":0,"previousCost":"1.00000000","comparedCost":"0.00000000","changePercent":-100},
+		{"keys":["AmazonS3"],"cost":"1.00000000","percent":0}]}`})
+
+	data, err := c.GetCostReportData(context.Background(), "ws_1", "rpt_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ec2, other, s3 := data.Breakdown[0], data.Breakdown[1], data.Breakdown[2]
+	if ec2.PreviousCost == nil || *ec2.PreviousCost != "8.00000000" || ec2.ComparedCost == nil || *ec2.ComparedCost != "11.00000000" ||
+		ec2.ChangePercent == nil || *ec2.ChangePercent != 37.5 {
+		t.Fatalf("decoded %+v", ec2)
+	}
+	if !other.IsOther || other.PreviousCost == nil || *other.PreviousCost != "1.00000000" || other.ChangePercent == nil || *other.ChangePercent != -100 {
+		t.Fatalf("decoded %+v", other)
+	}
+	if s3.PreviousCost != nil || s3.ComparedCost != nil || s3.ChangePercent != nil {
+		t.Fatalf("a row without a comparison decoded figures: %+v", s3)
+	}
+}
+
 func TestGetCostReportDataReadsTheUnitCost(t *testing.T) {
 	c, _ := testClient(t, stub{200, `{"summary":{},"series":[],"breakdown":[],
 		"unitCost":{"metricId":"bmt_1","name":"Customers","unit":"customer","currency":"EUR","average":"2.50000000",
@@ -195,6 +248,114 @@ func TestGetCostReportDataReadsTheUnitCost(t *testing.T) {
 	if u == nil || u.MetricID != "bmt_1" || u.Average == nil || *u.Average != "2.50000000" || len(u.Series) != 2 ||
 		u.Series[0].UnitCost == nil || *u.Series[0].UnitCost != "2.50000000" || u.Series[1].UnitCost != nil {
 		t.Fatalf("decoded %+v", u)
+	}
+}
+
+func TestGetCostReportDataReadsTheCalculationAndValue(t *testing.T) {
+	c, _ := testClient(t, stub{200, `{"summary":{},"series":[],"breakdown":[],
+		"unitCost":{"metricId":"bmt_1","name":"Revenue","unit":"EUR","calculation":"grossMargin","scale":1,
+		"currency":"EUR","average":"0.40000000",
+		"series":[{"date":"2026-09-01","metricAmount":"1000.00000000","value":"0.40000000"},{"date":"2026-09-02","metricAmount":"0.00000000"}]}}`})
+
+	data, err := c.GetCostReportData(context.Background(), "ws_1", "rpt_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := data.UnitCost
+	if u == nil || u.Calculation != UnitCostGrossMargin || u.Scale != 1 || len(u.Series) != 2 {
+		t.Fatalf("decoded %+v", u)
+	}
+	margin, empty := u.Series[0], u.Series[1]
+	if margin.Value == nil || *margin.Value != "0.40000000" || margin.UnitCost != nil {
+		t.Fatalf("decoded %+v, want the margin as its value and no unit cost", margin)
+	}
+	if empty.Value != nil || empty.MetricAmount == nil {
+		t.Fatalf("decoded %+v, want no value where the revenue is zero", empty)
+	}
+}
+
+func TestUnitCostCalculationsMatchTheContract(t *testing.T) {
+	wantContractValues(t, "UnitCostCalculation", []string{UnitCostPerUnit, UnitCostGrossMargin, UnitCostMetricValue})
+}
+
+// The calculation and scale are sent when set and read back; an update that leaves them out sends
+// neither, so the API keeps the report's own.
+func TestCostReportUnitCostCalculationIsSentAndRead(t *testing.T) {
+	read := `{"id":"rpt_1","title":"Margin","settings":{"unitCostMetricId":"bmt_1",` +
+		`"unitCostCalculation":"grossMargin","unitCostScale":1}}`
+	c, got := testClient(t,
+		stub{201, `{"id":"rpt_1","title":"Margin"}`}, stub{200, read},
+		stub{200, `{"id":"rpt_1","title":"Per thousand","settings":{"unitCostMetricId":"bmt_1",` +
+			`"unitCostCalculation":"perUnit","unitCostScale":1000}}`},
+		stub{200, read})
+
+	metric := "bmt_1"
+	report, err := c.CreateCostReport(context.Background(), &CreateCostReportInput{
+		Title:    "Margin",
+		Settings: &CostReportSettingsInput{UnitCostMetricID: &metric, UnitCostCalculation: UnitCostGrossMargin},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, _ := (*got)[0].Body["settings"].(map[string]any)
+	if len(created) != 2 || created["unitCostCalculation"] != "grossMargin" {
+		t.Fatalf("create settings = %v, want the metric and the calculation", created)
+	}
+	if report.Settings.UnitCostCalculation != UnitCostGrossMargin || report.Settings.UnitCostScale != 1 {
+		t.Fatalf("decoded %+v", report.Settings)
+	}
+
+	scale := 1000
+	updated, err := c.UpdateCostReport(context.Background(), "ws_1", "rpt_1", &UpdateCostReportInput{
+		Settings: &CostReportSettingsInput{UnitCostMetricID: &metric, UnitCostCalculation: UnitCostPerUnit, UnitCostScale: &scale},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sent, _ := (*got)[2].Body["settings"].(map[string]any)
+	if sent["unitCostCalculation"] != "perUnit" || sent["unitCostScale"] != float64(1000) {
+		t.Fatalf("update settings = %v, want perUnit per thousand", sent)
+	}
+	if updated.Settings.UnitCostCalculation != UnitCostPerUnit || updated.Settings.UnitCostScale != 1000 {
+		t.Fatalf("decoded %+v", updated.Settings)
+	}
+
+	if _, err := c.UpdateCostReport(context.Background(), "ws_1", "rpt_1", &UpdateCostReportInput{
+		Settings: &CostReportSettingsInput{UnitCostMetricID: &metric},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	bare, _ := (*got)[3].Body["settings"].(map[string]any)
+	if len(bare) != 1 {
+		t.Fatalf("update settings = %v, want only the metric", bare)
+	}
+}
+
+func TestGetCostReportDataReadsTheForecast(t *testing.T) {
+	c, _ := testClient(t,
+		stub{200, `{"summary":{"currency":"EUR"},"series":[],"breakdown":[],"forecast":{"series":[
+			{"date":"2026-10-23","amount":"10.00000000","lowerBound":"10.00000000","upperBound":"12.50000000"},
+			{"date":"2026-10-24","amount":"10.00000000","lowerBound":"7.50000000","upperBound":"12.50000000"}]}}`},
+		stub{200, `{"summary":{},"series":[],"breakdown":[]}`})
+
+	data, err := c.GetCostReportData(context.Background(), "ws_1", "rpt_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := data.Forecast
+	if f == nil || len(f.Series) != 2 {
+		t.Fatalf("decoded %+v", f)
+	}
+	if p := f.Series[1]; p.Date != "2026-10-24" || p.Amount != "10.00000000" || p.LowerBound != "7.50000000" || p.UpperBound != "12.50000000" {
+		t.Fatalf("decoded %+v", p)
+	}
+
+	without, err := c.GetCostReportData(context.Background(), "ws_1", "rpt_2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if without.Forecast != nil {
+		t.Fatalf("decoded %+v from a report without a forecast", without.Forecast)
 	}
 }
 

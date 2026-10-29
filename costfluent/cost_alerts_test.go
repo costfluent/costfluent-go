@@ -114,3 +114,17 @@ func TestUpdateCostAlertListsAreSentWhenNamedEvenEmpty(t *testing.T) {
 		t.Errorf("replacing sent providerIds = %v, want [prv_2]", (*got)[2].Body["providerIds"])
 	}
 }
+
+func TestAlertThresholdTypesMatchTheContract(t *testing.T) {
+	wantContractValues(t, "AlertThresholdType", []string{
+		CostAlertThresholdAbsolute, CostAlertThresholdPercentageIncrease,
+		CostAlertThresholdBudgetPercentage, CostAlertThresholdTagCoverageBelow,
+	})
+}
+
+func TestComparisonPeriodsMatchTheContract(t *testing.T) {
+	wantContractValues(t, "ComparisonPeriod", []string{
+		CostAlertComparePreviousDay, CostAlertComparePreviousWeek,
+		CostAlertComparePreviousMonth, CostAlertCompareSameDayLastMonth,
+	}, contractOmission{"previousQuarter", "the API refuses it until a release that reads it is on prod"})
+}

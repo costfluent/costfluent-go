@@ -18,6 +18,11 @@ import (
 // against this workspace's data sources. Off, the schedule is skipped for every source no other
 // workspace still syncs; stored cost data and an explicitly requested sync are unaffected.
 //
+// BlendCommitmentDiscounts, when on, spreads each day's AWS Savings Plan and Reserved Instance
+// discount evenly across the usage it could cover in every amortized figure of the workspace,
+// rather than leave it on the usage AWS applied it to. Billed figures, connection totals and
+// commitment coverage do not change. Only an Owner can change it.
+//
 // TimeZone is the IANA zone the workspace's calendar runs in: its "today", its budget and alert
 // periods and the default for its report notifications. Cost rows keep the provider's UTC day.
 type Workspace struct {
@@ -28,6 +33,7 @@ type Workspace struct {
 	ConversionCurrency       *string        `json:"conversionCurrency,omitempty"`
 	ConversionMethod         string         `json:"conversionMethod,omitempty"`
 	EnableAutomaticSyncing   bool           `json:"enableAutomaticSyncing"`
+	BlendCommitmentDiscounts bool           `json:"blendCommitmentDiscounts"`
 	TimeZone                 string         `json:"timeZone"`
 	ReportDefaults           ReportDefaults `json:"reportDefaults"`
 	// AnomaliesExcludeMarketplace and AnomaliesExcludeCommitmentFees leave those charges out of
@@ -143,6 +149,7 @@ type UpdateWorkspaceInput struct {
 	ConversionCurrency             *string              `json:"conversionCurrency,omitempty"`
 	ConversionMethod               *string              `json:"conversionMethod,omitempty"`
 	EnableAutomaticSyncing         *bool                `json:"enableAutomaticSyncing,omitempty"`
+	BlendCommitmentDiscounts       *bool                `json:"blendCommitmentDiscounts,omitempty"`
 	TimeZone                       *string              `json:"timeZone,omitempty"`
 	ReportDefaults                 *ReportDefaultsInput `json:"reportDefaults,omitempty"`
 	AnomaliesExcludeMarketplace    *bool                `json:"anomaliesExcludeMarketplace,omitempty"`

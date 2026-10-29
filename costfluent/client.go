@@ -41,6 +41,7 @@ type Client struct {
 	// httpClient, so the two apply in either order and the caller's client is never changed.
 	callerHTTPClient *http.Client
 	timeout          *time.Duration
+	maxRetryAfter    *time.Duration
 	baseURL          string
 	baseURLErr       error
 	apiKey           string
@@ -82,7 +83,14 @@ func NewClient(opts ...Option) *Client {
 	if transport == nil {
 		transport = http.DefaultTransport
 	}
-	transport = &retryTransport{base: transport, attemptTimeout: timeout}
+	retries := &retryTransport{base: transport, attemptTimeout: timeout}
+	if c.maxRetryAfter != nil {
+		retries.maxRetryAfter = *c.maxRetryAfter
+		if retries.maxRetryAfter <= 0 {
+			retries.maxRetryAfter = waitOutNone
+		}
+	}
+	transport = retries
 	if c.debug {
 		transport = &debugTransport{base: transport, logger: log.Printf}
 	}

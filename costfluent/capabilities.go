@@ -25,6 +25,7 @@ const (
 	CapabilitySyncProviders                 Capability = "syncProviders"
 	CapabilityReportKubernetesUsage         Capability = "reportKubernetesUsage"
 	CapabilityViewCosts                     Capability = "viewCosts"
+	CapabilitySubmitCostEstimates           Capability = "submitCostEstimates"
 	CapabilityViewBudgets                   Capability = "viewBudgets"
 	CapabilityCreateBudget                  Capability = "createBudget"
 	CapabilityUpdateBudget                  Capability = "updateBudget"
@@ -57,6 +58,8 @@ const (
 	CapabilityManageTags                    Capability = "manageTags"
 	CapabilityManageTagKeys                 Capability = "manageTagKeys"
 	CapabilityViewAuditLog                  Capability = "viewAuditLog"
+	CapabilityViewSavingsItems              Capability = "viewSavingsItems"
+	CapabilityManageSavingsItems            Capability = "manageSavingsItems"
 	CapabilityViewCostAllocation            Capability = "viewCostAllocation"
 	CapabilityManageCostAllocation          Capability = "manageCostAllocation"
 	CapabilityManageBusinessMetrics         Capability = "manageBusinessMetrics"
@@ -83,6 +86,7 @@ func Capabilities() []Capability {
 		CapabilitySyncProviders,
 		CapabilityReportKubernetesUsage,
 		CapabilityViewCosts,
+		CapabilitySubmitCostEstimates,
 		CapabilityViewBudgets,
 		CapabilityCreateBudget,
 		CapabilityUpdateBudget,
@@ -115,6 +119,8 @@ func Capabilities() []Capability {
 		CapabilityManageTags,
 		CapabilityManageTagKeys,
 		CapabilityViewAuditLog,
+		CapabilityViewSavingsItems,
+		CapabilityManageSavingsItems,
 		CapabilityViewCostAllocation,
 		CapabilityManageCostAllocation,
 		CapabilityManageBusinessMetrics,

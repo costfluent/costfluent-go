@@ -98,10 +98,12 @@ func (c *Client) do(req *http.Request, v any) error {
 // requests, creates under an Idempotency-Key among them, on a 5xx, a 404 from the proxy rather than
 // the API, or a transport error. Each attempt runs under its own timeout.
 type retryTransport struct {
-	base           http.RoundTripper
-	maxRetries     int
-	baseDelay      time.Duration
-	maxDelay       time.Duration
+	base       http.RoundTripper
+	maxRetries int
+	baseDelay  time.Duration
+	maxDelay   time.Duration
+	// maxRetryAfter is the longest wait the API asks for that is waited out: zero is
+	// defaultMaxRetryAfter, and waitOutNone none at all.
 	maxRetryAfter  time.Duration
 	attemptTimeout time.Duration
 	now            func() time.Time
@@ -111,6 +113,10 @@ type retryTransport struct {
 // defaultMaxRetryAfter is the longest Retry-After the transport waits out. A longer one means the
 // token's hourly quota is spent, and the 429 is returned rather than held for most of an hour.
 const defaultMaxRetryAfter = 60 * time.Second
+
+// waitOutNone is the maxRetryAfter that returns every wait the API asks for at once: a Retry-After
+// of 0 is still above it.
+const waitOutNone = -time.Nanosecond
 
 func sleepContext(ctx context.Context, d time.Duration) error {
 	timer := time.NewTimer(d)
@@ -169,7 +175,7 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 		delay := t.calculateDelay(attempt, baseDelay, maxDelay, resp)
 		if resp != nil {
-			if delay > maxRetryAfter {
+			if _, asked := retryAfter(resp.Header, t.clock()); asked && delay > maxRetryAfter {
 				return resp, nil
 			}
 			_ = resp.Body.Close()

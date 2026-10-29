@@ -2,6 +2,7 @@ package costfluent
 
 import (
 	"context"
+	"fmt"
 	"testing"
 )
 
@@ -131,5 +132,39 @@ func TestUpdateWorkspaceSendsOnlyTheAnomalySettingsItNames(t *testing.T) {
 	if ws.AnomaliesExcludeMarketplace || !ws.AnomaliesExcludeCommitmentFees ||
 		!ws.AnomalyNotificationThreshold.Equal(Decimal("250")) {
 		t.Fatalf("read %+v", ws)
+	}
+}
+
+// The blend is sent only when an update names it, false included, and read back from the
+// workspace the API answers with.
+func TestUpdateWorkspaceSendsTheCommitmentDiscountBlend(t *testing.T) {
+	for _, blend := range []bool{true, false} {
+		c, got := testClient(t, stub{200, fmt.Sprintf(`{"id":"ws_1","name":"Prod","timeZone":"UTC",
+			"enableAutomaticSyncing":true,"blendCommitmentDiscounts":%t}`, blend)})
+
+		ws, err := c.UpdateWorkspace(context.Background(), "ws_1", &UpdateWorkspaceInput{BlendCommitmentDiscounts: &blend})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		body := (*got)[0].Body
+		if len(body) != 1 || body["blendCommitmentDiscounts"] != blend {
+			t.Fatalf("sent %v, want only blendCommitmentDiscounts = %t", body, blend)
+		}
+		if ws.BlendCommitmentDiscounts != blend || !ws.EnableAutomaticSyncing {
+			t.Fatalf("read %+v, want blendCommitmentDiscounts = %t", ws, blend)
+		}
+	}
+}
+
+func TestUpdateWorkspaceLeavesAnUnnamedBlendOut(t *testing.T) {
+	c, got := testClient(t, stub{200, `{"id":"ws_1","name":"Prod","blendCommitmentDiscounts":true}`})
+
+	syncing := false
+	if _, err := c.UpdateWorkspace(context.Background(), "ws_1", &UpdateWorkspaceInput{EnableAutomaticSyncing: &syncing}); err != nil {
+		t.Fatal(err)
+	}
+	if _, sent := (*got)[0].Body["blendCommitmentDiscounts"]; sent {
+		t.Errorf("an unset blend was sent: %v", (*got)[0].Body)
 	}
 }

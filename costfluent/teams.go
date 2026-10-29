@@ -53,6 +53,9 @@ type TeamWorkspaceAccess struct {
 	WorkspaceID   string `json:"workspaceId"`
 	WorkspaceName string `json:"workspaceName"`
 	AccessLevel   string `json:"accessLevel"`
+	// DefaultDashboardID is the workspace's dashboard the team's members open after signing in,
+	// unless they chose their own; nil for none, or when that dashboard was deleted.
+	DefaultDashboardID *string `json:"defaultDashboardId,omitempty"`
 }
 
 // ListTeams returns a page of the organization's teams. It needs an organization token.
@@ -212,6 +215,29 @@ func (c *Client) SetTeamWorkspaceAccess(ctx context.Context, teamID, workspaceID
 		return err
 	}
 	return c.do(req, nil)
+}
+
+// setTeamDefaultDashboardBody always carries dashboardId, so nil clears the default.
+type setTeamDefaultDashboardBody struct {
+	DashboardID *string `json:"dashboardId"`
+}
+
+// SetTeamDefaultDashboard sets the dashboard of a workspace the team's members open after signing
+// in, unless they chose their own, or with a nil dashboardID clears it. The team needs access to
+// the workspace other than noAccess to be given one, and the Everyone team never has one. Changing
+// the team's access level keeps the default; removing its access ends it.
+func (c *Client) SetTeamDefaultDashboard(ctx context.Context, teamID, workspaceID string, dashboardID *string) (*TeamWorkspaceAccess, error) {
+	body := setTeamDefaultDashboardBody{DashboardID: dashboardID}
+	req, err := c.newRequest(ctx, http.MethodPut, teamPath(teamID)+"/workspaces/"+url.PathEscape(workspaceID)+"/default-dashboard", &body)
+	if err != nil {
+		return nil, err
+	}
+
+	var access TeamWorkspaceAccess
+	if err := c.do(req, &access); err != nil {
+		return nil, err
+	}
+	return &access, nil
 }
 
 // RemoveTeamWorkspaceAccess removes a team's access level on a workspace.

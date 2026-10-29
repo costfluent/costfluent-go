@@ -10,6 +10,7 @@ import (
 const (
 	TokenTypeOrganization = "organization"
 	TokenTypeWorkspace    = "workspace"
+	TokenTypeCluster      = "cluster"
 )
 
 // Me is the API token a client authenticates with: its organization, its workspace when it is a
