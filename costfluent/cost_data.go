@@ -9,7 +9,7 @@ import (
 
 // CostFilterOptions are the scoping options the cost data and cost summary queries share. Dates
 // are calendar days, YYYY-MM-DD, and both are required. A nil switch keeps the API's default:
-// credits excluded, refunds and tax included, amortized cost.
+// credits and refunds excluded, tax included, amortized cost.
 type CostFilterOptions struct {
 	StartDate string
 	EndDate   string
@@ -146,13 +146,16 @@ type CostDataPoint struct {
 
 // CostDataMeta describes the query that was answered
 type CostDataMeta struct {
-	StartDate    string                `json:"startDate"`
-	EndDate      string                `json:"endDate"`
-	Granularity  string                `json:"granularity"`
-	Measure      string                `json:"measure,omitempty"`
-	TotalRecords int                   `json:"totalRecords"`
-	TotalCost    Decimal               `json:"totalCost"`
-	Currency     string                `json:"currency"`
+	StartDate    string `json:"startDate"`
+	EndDate      string `json:"endDate"`
+	Granularity  string `json:"granularity"`
+	Measure      string `json:"measure,omitempty"`
+	TotalRecords int    `json:"totalRecords"`
+	// TotalCost and Currency are unset when the window mixes currencies without conversion, and
+	// left out when written rather than written as an empty total; the totals are then read from
+	// Presentation.TotalsByCurrency.
+	TotalCost    Decimal               `json:"totalCost,omitempty"`
+	Currency     string                `json:"currency,omitempty"`
 	Presentation *CurrencyPresentation `json:"presentation,omitempty"`
 
 	// CommitmentDiscounts is how the amortized figures placed commitment discounts.
@@ -257,12 +260,17 @@ type ServiceCostBreakdown struct {
 	Percentage  float64 `json:"percentage"`
 }
 
-// ProviderCostBreakdown is one provider's share of the total
+// ProviderCostBreakdown is one connection's cost in the window, one entry per currency when the
+// window mixes currencies with conversion off
 type ProviderCostBreakdown struct {
 	ProviderID   string      `json:"providerId"`
 	ProviderName string      `json:"providerName"`
 	ProviderKey  ProviderKey `json:"providerKey"`
-	Cost         Decimal     `json:"cost"`
+	// Currency is the billing currency when the window mixes currencies with conversion off, which
+	// gives a connection billed in several an entry for each; nil otherwise, where CostSummary.Currency
+	// is every figure's.
+	Currency *string `json:"currency"`
+	Cost     Decimal `json:"cost"`
 }
 
 // GetCostSummary summarizes cost over a window

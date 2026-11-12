@@ -40,6 +40,9 @@ func (c *Client) newRequest(ctx context.Context, method, path string, body any) 
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", c.userAgent)
+	if c.agent != "" {
+		req.Header.Set(AgentHeader, c.agent)
+	}
 	// On the request rather than in a transport, so the client drops it on a redirect to another host.
 	if c.apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
@@ -67,6 +70,12 @@ func (c *Client) newWorkspaceRequest(
 	return req, nil
 }
 
+// statusRecorder is a result whose meaning depends on the success status that carried it, such as
+// a post answering 201 when it created and 200 when it replaced.
+type statusRecorder interface {
+	setStatus(code int)
+}
+
 // do executes the request and decodes the response, keeping a versioned resource's ETag.
 func (c *Client) do(req *http.Request, v any) error {
 	resp, err := c.httpClient.Do(req)
@@ -88,6 +97,9 @@ func (c *Client) do(req *http.Request, v any) error {
 		}
 		if created, ok := v.(replayable); ok {
 			created.setReplayed(resp.Header.Get(replayedHeader) == "true")
+		}
+		if answer, ok := v.(statusRecorder); ok {
+			answer.setStatus(resp.StatusCode)
 		}
 	}
 	return nil
@@ -240,7 +252,10 @@ func (e *attemptTimeoutError) Temporary() bool { return true }
 // retryable reports whether a request is safe to resend after a lost response or a 5xx: a POST
 // triggers, so resending one the server may have run could run it twice unless it carries an
 // Idempotency-Key, and a request with If-Match the server applied would be refused by its own now
-// stale precondition.
+// stale precondition. An unconditional DELETE is resent, and when the first attempt removed the
+// object before its answer was lost, the resend's not-found is reported as the API answered it: a
+// success made up here would also be reported for an id that never existed or that the token
+// cannot see.
 func retryable(req *http.Request) bool {
 	if req.Header.Get("If-Match") != "" {
 		return false

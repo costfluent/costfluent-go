@@ -183,7 +183,7 @@ func TestUpdateDashboardWidgetSendsOnlyWhatChanged(t *testing.T) {
 func TestDeleteDashboardWidgetAndAMissingOneIsNotFound(t *testing.T) {
 	c, got := testClient(t,
 		stub{204, ""},
-		stub{404, `{"title":"Not Found","status":404,"code":"NotFound"}`},
+		stub{404, `{"title":"Not Found","status":404,"code":"not_found"}`},
 	)
 
 	if err := c.DeleteDashboardWidget(context.Background(), "ws_1", "dsh_1", "wdg_1"); err != nil {

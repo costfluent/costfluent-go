@@ -50,9 +50,13 @@ var contractOps = map[string]struct{ Method, Path string }{
 
 	"GetKubernetesEfficiency": {"GET", "/v1/kubernetes/efficiency"},
 
-	"ListSavingsItems":    {"GET", "/v1/savings-items"},
-	"ListAllSavingsItems": {"GET", "/v1/savings-items"},
-	"GetSavingsItem":      {"GET", "/v1/savings-items/{savingsItemId}"},
+	"ListSavingsItems":       {"GET", "/v1/savings-items"},
+	"ListAllSavingsItems":    {"GET", "/v1/savings-items"},
+	"GetSavingsItem":         {"GET", "/v1/savings-items/{savingsItemId}"},
+	"AcceptSavingsItem":      {"POST", "/v1/savings-items/{savingsItemId}/accept"},
+	"ImplementSavingsItem":   {"POST", "/v1/savings-items/{savingsItemId}/implement"},
+	"RejectSavingsItem":      {"POST", "/v1/savings-items/{savingsItemId}/reject"},
+	"AssignSavingsItemOwner": {"PUT", "/v1/savings-items/{savingsItemId}/owner"},
 
 	"ListSavingsViews":    {"GET", "/v1/savings-views"},
 	"ListAllSavingsViews": {"GET", "/v1/savings-views"},
@@ -97,12 +101,13 @@ var contractOps = map[string]struct{ Method, Path string }{
 	"QueryCostData":  {"GET", "/v1/costs"},
 	"GetCostSummary": {"GET", "/v1/costs/summary"},
 
-	"ListCostReports":   {"GET", "/v1/cost-reports"},
-	"GetCostReport":     {"GET", "/v1/cost-reports/{costReportId}"},
-	"GetCostReportData": {"GET", "/v1/cost-reports/{costReportId}/data"},
-	"CreateCostReport":  {"POST", "/v1/cost-reports"},
-	"UpdateCostReport":  {"PUT", "/v1/cost-reports/{costReportId}"},
-	"DeleteCostReport":  {"DELETE", "/v1/cost-reports/{costReportId}"},
+	"ListCostReports":     {"GET", "/v1/cost-reports"},
+	"ListCostReportsPage": {"GET", "/v1/cost-reports"},
+	"GetCostReport":       {"GET", "/v1/cost-reports/{costReportId}"},
+	"GetCostReportData":   {"GET", "/v1/cost-reports/{costReportId}/data"},
+	"CreateCostReport":    {"POST", "/v1/cost-reports"},
+	"UpdateCostReport":    {"PUT", "/v1/cost-reports/{costReportId}"},
+	"DeleteCostReport":    {"DELETE", "/v1/cost-reports/{costReportId}"},
 
 	"ListDashboards":    {"GET", "/v1/dashboards"},
 	"ListAllDashboards": {"GET", "/v1/dashboards"},
@@ -127,16 +132,19 @@ var contractOps = map[string]struct{ Method, Path string }{
 	"SetFolderSavedFilter": {"PUT", "/v1/folders/{folderId}/saved-filter"},
 	"DeleteFolder":         {"DELETE", "/v1/folders/{folderId}"},
 
-	"ListProviders":              {"GET", "/v1/providers"},
-	"ListAllProviders":           {"GET", "/v1/providers"},
-	"GetProvider":                {"GET", "/v1/providers/{providerId}"},
-	"CreateProvider":             {"POST", "/v1/providers"},
-	"UpdateProvider":             {"PUT", "/v1/providers/{providerId}"},
-	"DeleteProvider":             {"DELETE", "/v1/providers/{providerId}"},
-	"TestProviderConnection":     {"POST", "/v1/providers/{providerId}/test"},
-	"TriggerProviderSync":        {"POST", "/v1/providers/{providerId}/sync"},
-	"ProvisionGcpServiceAccount": {"POST", "/v1/providers/gcp/service-account"},
-	"GetAwsConnector":            {"GET", "/v1/providers/aws/connector"},
+	"ListProviders":               {"GET", "/v1/providers"},
+	"ListAllProviders":            {"GET", "/v1/providers"},
+	"GetProvider":                 {"GET", "/v1/providers/{providerId}"},
+	"ListCollectionStatus":        {"GET", "/v1/providers/collection-status"},
+	"ListAllCollectionStatus":     {"GET", "/v1/providers/collection-status"},
+	"GetProviderCollectionStatus": {"GET", "/v1/providers/{providerId}/collection-status"},
+	"CreateProvider":              {"POST", "/v1/providers"},
+	"UpdateProvider":              {"PUT", "/v1/providers/{providerId}"},
+	"DeleteProvider":              {"DELETE", "/v1/providers/{providerId}"},
+	"TestProviderConnection":      {"POST", "/v1/providers/{providerId}/test"},
+	"TriggerProviderSync":         {"POST", "/v1/providers/{providerId}/sync"},
+	"ProvisionGcpServiceAccount":  {"POST", "/v1/providers/gcp/service-account"},
+	"GetAwsConnector":             {"GET", "/v1/providers/aws/connector"},
 
 	"TranslateCostFilter": {"GET", "/v1/cost-filters/translate"},
 
@@ -200,6 +208,9 @@ var contractOps = map[string]struct{ Method, Path string }{
 
 	"SubmitCosts": {"POST", "/v1/custom-providers/{providerId}/costs"},
 
+	"SubmitCostEstimate": {"POST", "/v1/cost-estimates"},
+	"ApplyCostEstimate":  {"POST", "/v1/cost-estimates/apply"},
+
 	"ListUsers":    {"GET", "/v1/users"},
 	"ListAllUsers": {"GET", "/v1/users"},
 	"GetUser":      {"GET", "/v1/users/{userId}"},
@@ -214,7 +225,7 @@ var contractOps = map[string]struct{ Method, Path string }{
 }
 
 // notOperations are the exported client methods that send nothing.
-var notOperations = map[string]bool{"Workspace": true, "BaseURL": true, "ResolveWorkspace": true}
+var notOperations = map[string]bool{"Workspace": true, "Agent": true, "BaseURL": true, "ResolveWorkspace": true}
 
 type specSchema struct {
 	Ref        string                 `json:"$ref"`
@@ -307,14 +318,21 @@ func loadSpec(t *testing.T) *spec {
 	return &s
 }
 
+// match finds the operation a request reaches. A literal segment wins over a parameter, as the
+// API's router decides, so /v1/providers/collection-status is not read as /v1/providers/{providerId};
+// the routes come from a map, so without the rule the pick would change from run to run.
 func (s *spec) match(method, path string) *route {
+	var best *route
 	for i := range s.routes {
 		r := &s.routes[i]
-		if r.method == method && r.pattern.MatchString(path) {
-			return r
+		if r.method != method || !r.pattern.MatchString(path) {
+			continue
+		}
+		if best == nil || strings.Count(r.template, "{") < strings.Count(best.template, "{") {
+			best = r
 		}
 	}
-	return nil
+	return best
 }
 
 // resolve follows $ref and single-member allOf/oneOf wrappers, merging allOf properties.

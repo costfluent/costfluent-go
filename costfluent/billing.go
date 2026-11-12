@@ -47,6 +47,12 @@ type Entitlement struct {
 	IngestionHalted       bool   `json:"ingestionHalted"`
 	IngestionHaltedReason string `json:"ingestionHaltedReason"`
 
+	// IngestionHaltCause says why collection is halted: "operator", "unpaid" or
+	// "collectionPausedAboveBand"; nil when it is not. Word a halt from it rather than from
+	// IngestionHaltedReason, which is an English phrase for the two causes the system sets and an
+	// operator's own words only for "operator".
+	IngestionHaltCause *string `json:"ingestionHaltCause"`
+
 	// BandPlanCode is the tier three months of measured spend puts this account in. Recorded, never
 	// applied: a band is evidence for a conversation, not a charge.
 	BandPlanCode *string `json:"bandPlanCode"`
@@ -59,7 +65,8 @@ type Entitlement struct {
 
 // UsageHistoryEntry is one completed month, as it feeds the band average.
 type UsageHistoryEntry struct {
-	PeriodStart  string  `json:"periodStart"`
+	PeriodStart string `json:"periodStart"`
+	// TrackedSpend is unset unless the token reads costs in every workspace of the organization.
 	TrackedSpend Decimal `json:"trackedSpend"`
 	RowsIngested int64   `json:"rowsIngested"`
 	BytesStored  int64   `json:"bytesStored"`
@@ -73,6 +80,8 @@ type Usage struct {
 	PeriodStart string `json:"periodStart"`
 	Currency    string `json:"currency"`
 
+	// TrackedSpend is unset unless the token reads costs in every workspace of the organization:
+	// an organization token issued viewCosts by a current Owner, or one the organization owns.
 	TrackedSpend          Decimal  `json:"trackedSpend"`
 	IsSpendComplete       bool     `json:"isSpendComplete"`
 	UnconvertedCurrencies []string `json:"unconvertedCurrencies"`
@@ -84,6 +93,8 @@ type Usage struct {
 
 	ComputedAt *time.Time `json:"computedAt"`
 
+	// AverageTrackedSpend is nil when the spend is withheld, as TrackedSpend is, and also when no
+	// completed month has been measured yet; an unset TrackedSpend tells the two apart.
 	AverageTrackedSpend *Decimal `json:"averageTrackedSpend"`
 	BandPlanCode        *string  `json:"bandPlanCode"`
 

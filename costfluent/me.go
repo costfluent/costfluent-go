@@ -28,6 +28,11 @@ type Me struct {
 	TokenType          string       `json:"tokenType"`
 	TokenName          string       `json:"tokenName"`
 	Capabilities       []Capability `json:"capabilities"`
+
+	// AgentWritesAllowed is the organization's setting that lets AI agents create and change
+	// objects: while it is false the API refuses every write a client made by Agent sends. An API
+	// that predates the setting leaves it out, which reads as false.
+	AgentWritesAllowed bool `json:"agentWritesAllowed"`
 }
 
 // Can reports whether the token carries capability.

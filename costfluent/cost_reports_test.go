@@ -174,7 +174,7 @@ func TestListCostReportsWalksEveryPage(t *testing.T) {
 		stub{200, `{"links":{"self":"s"},"data":[{"id":"rpt_2","title":"Two"}]}`},
 	)
 
-	reports, err := c.ListCostReports(context.Background(), "ws_1")
+	reports, err := c.ListCostReports(context.Background(), "ws_1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,6 +184,92 @@ func TestListCostReportsWalksEveryPage(t *testing.T) {
 	wantQuery(t, (*got)[1], "workspaceId", "ws_1")
 	if len(reports) != 2 || reports[1].Title != "Two" {
 		t.Fatalf("decoded %+v", reports)
+	}
+}
+
+func TestListCostReportsSendsTheFolderOnEveryPage(t *testing.T) {
+	c, got := testClient(t,
+		stub{200, `{"links":{"self":"s","next":"https://api.test/v1/cost-reports?page=2&limit=100"},"data":[{"id":"rpt_1","folderId":"fld_1"}]}`},
+		stub{200, `{"links":{"self":"s"},"data":[{"id":"rpt_2","folderId":"fld_1"}]}`},
+	)
+
+	reports, err := c.ListCostReports(context.Background(), "ws_1", &ListCostReportsOptions{FolderID: "fld_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, page := range []string{"1", "2"} {
+		wantQuery(t, (*got)[i], "folderId", "fld_1")
+		wantQuery(t, (*got)[i], "page", page)
+		wantQuery(t, (*got)[i], "workspaceId", "ws_1")
+	}
+	if len(reports) != 2 {
+		t.Fatalf("decoded %+v", reports)
+	}
+}
+
+func TestListCostReportsWithoutAFolderSendsNone(t *testing.T) {
+	for name, opts := range map[string]*ListCostReportsOptions{"nil options": nil, "no folder": {}} {
+		t.Run(name, func(t *testing.T) {
+			c, got := testClient(t, stub{200, `{"links":{"self":"s"},"data":[]}`})
+
+			if _, err := c.ListCostReports(context.Background(), "ws_1", opts); err != nil {
+				t.Fatal(err)
+			}
+			if v, sent := (*got)[0].Query["folderId"]; sent {
+				t.Errorf("sent folderId %v although no folder was asked for", v)
+			}
+		})
+	}
+}
+
+func TestListCostReportsPageReadsOnePageAndItsLinks(t *testing.T) {
+	for name, opts := range map[string]*ListCostReportsOptions{"every folder": nil, "one folder": {FolderID: "fld_1"}} {
+		t.Run(name, func(t *testing.T) {
+			c, got := testClient(t,
+				stub{200, `{"links":{"self":"s","next":"https://api.test/v1/cost-reports?page=3&limit=100"},"data":[{"id":"rpt_1","title":"One"}]}`},
+			)
+
+			resp, err := c.ListCostReportsPage(context.Background(), "ws_1", opts, &PageOptions{Page: 2, Limit: 100})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(*got) != 1 {
+				t.Fatalf("sent %d requests, want one page's", len(*got))
+			}
+			wantQuery(t, (*got)[0], "workspaceId", "ws_1")
+			wantQuery(t, (*got)[0], "page", "2")
+			wantQuery(t, (*got)[0], "limit", "100")
+			if opts != nil {
+				wantQuery(t, (*got)[0], "folderId", "fld_1")
+			} else if v, sent := (*got)[0].Query["folderId"]; sent {
+				t.Errorf("sent folderId %v although no folder was asked for", v)
+			}
+			if len(resp.Data) != 1 || resp.Data[0].Title != "One" || resp.Links.Next != "https://api.test/v1/cost-reports?page=3&limit=100" {
+				t.Errorf("decoded %+v", resp)
+			}
+		})
+	}
+}
+
+func TestCostReportReadsWhetherItIsTheDefault(t *testing.T) {
+	c, _ := testClient(t,
+		stub{200, `{"id":"rpt_default","isDefault":true}`},
+		stub{200, `{"links":{"self":"s"},"data":[{"id":"rpt_default","isDefault":true},{"id":"rpt_2","isDefault":false}]}`},
+	)
+
+	report, err := c.GetCostReport(context.Background(), "ws_1", "rpt_default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.IsDefault {
+		t.Errorf("GetCostReport decoded %+v, want the default report", report)
+	}
+	reports, err := c.ListCostReports(context.Background(), "ws_1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reports) != 2 || !reports[0].IsDefault || reports[1].IsDefault {
+		t.Fatalf("ListCostReports decoded %+v, want only the first to be the default", reports)
 	}
 }
 
@@ -212,6 +298,30 @@ func TestGetCostReportDataReadsTheReportsNumbers(t *testing.T) {
 	}
 }
 
+func TestGetCostReportDataReadsTheNamesOfItsGroups(t *testing.T) {
+	c, _ := testClient(t,
+		stub{200, `{"summary":{},"series":[],"breakdown":[{"keys":["i-0abc","222222222222","c-prod-eu"],"cost":"12.50000000","percent":100}],
+			"resourceNames":{"i-0abc":"checkout-api"},"accountNames":{"222222222222":"prod-payments"},"clusterNames":{"c-prod-eu":"Production EU"}}`},
+		stub{200, `{"summary":{},"series":[],"breakdown":[],"resourceNames":null,"accountNames":null,"clusterNames":null}`})
+
+	data, err := c.GetCostReportData(context.Background(), "ws_1", "rpt_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data.ResourceNames["i-0abc"] != "checkout-api" || data.AccountNames["222222222222"] != "prod-payments" ||
+		data.ClusterNames["c-prod-eu"] != "Production EU" {
+		t.Fatalf("decoded resourceNames %v, accountNames %v, clusterNames %v", data.ResourceNames, data.AccountNames, data.ClusterNames)
+	}
+
+	unnamed, err := c.GetCostReportData(context.Background(), "ws_1", "rpt_2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unnamed.ResourceNames != nil || unnamed.AccountNames != nil || unnamed.ClusterNames != nil {
+		t.Fatalf("a report grouped by nothing named decoded names: %+v", unnamed)
+	}
+}
+
 func TestGetCostReportDataReadsEachGroupsComparison(t *testing.T) {
 	c, _ := testClient(t, stub{200, `{"summary":{"previousPeriodCost":"9.00000000","comparedCost":"11.00000000"},"series":[],
 		"breakdown":[{"keys":["AmazonEC2"],"cost":"12.50000000","percent":100,"previousCost":"8.00000000","comparedCost":"11.00000000","changePercent":37.5},
@@ -232,6 +342,28 @@ func TestGetCostReportDataReadsEachGroupsComparison(t *testing.T) {
 	}
 	if s3.PreviousCost != nil || s3.ComparedCost != nil || s3.ChangePercent != nil {
 		t.Fatalf("a row without a comparison decoded figures: %+v", s3)
+	}
+}
+
+func TestGetCostReportDataReadsEachUsageGroupsUnitPrice(t *testing.T) {
+	c, _ := testClient(t, stub{200, `{"summary":{"measure":"usage","currency":"USD"},"series":[],
+		"breakdown":[{"keys":["claude-3-5-sonnet","input"],"cost":"20000000.00000000","percent":95,"unit":"Tokens","unitPrice":0.000003},
+		{"keys":[],"isOther":true,"cost":"1000000.00000000","percent":5,"unit":"Tokens","unitPrice":0.000000035},
+		{"keys":["mixed"],"cost":"5.00000000","percent":0,"unit":"Hours","unitPrice":null}]}`})
+
+	data, err := c.GetCostReportData(context.Background(), "ws_1", "rpt_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sonnet, other, mixed := data.Breakdown[0], data.Breakdown[1], data.Breakdown[2]
+	if sonnet.UnitPrice == nil || *sonnet.UnitPrice != 0.000003 {
+		t.Fatalf("decoded %+v", sonnet)
+	}
+	if other.UnitPrice == nil || *other.UnitPrice != 0.000000035 {
+		t.Fatalf("the remainder's price decoded as %+v", other)
+	}
+	if mixed.UnitPrice != nil {
+		t.Fatalf("a group without a price decoded one: %+v", mixed)
 	}
 }
 
@@ -493,6 +625,84 @@ func TestCostReportComparisonWindowIsReadAndSentBack(t *testing.T) {
 	bare, _ := (*got)[2].Body["settings"].(map[string]any)
 	if len(bare) != 1 {
 		t.Fatalf("update settings = %v, want no window keys", bare)
+	}
+}
+
+func TestComparisonModesMatchTheContract(t *testing.T) {
+	wantContractValues(t, "ComparisonMode", []string{ComparisonModePreviousPeriod, ComparisonModeSamePeriodLastYear})
+}
+
+// The comparison mode is sent when set and read back; an update that leaves it out sends no mode,
+// so the API keeps the report's own.
+func TestCostReportComparisonModeIsSentAndRead(t *testing.T) {
+	read := `{"id":"rpt_1","title":"Year on year","settings":{"compareToLastPeriod":true,"comparisonMode":"samePeriodLastYear"}}`
+	c, got := testClient(t,
+		stub{201, `{"id":"rpt_1","title":"Year on year"}`}, stub{200, read},
+		stub{200, read})
+
+	compare := true
+	report, err := c.CreateCostReport(context.Background(), &CreateCostReportInput{
+		Title: "Year on year",
+		Settings: &CostReportSettingsInput{
+			CompareToLastPeriod: &compare, ComparisonMode: ComparisonModeSamePeriodLastYear,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, _ := (*got)[0].Body["settings"].(map[string]any)
+	if len(created) != 2 || created["comparisonMode"] != "samePeriodLastYear" {
+		t.Fatalf("create settings = %v, want the switch and the mode", created)
+	}
+	if report.Settings.ComparisonMode != ComparisonModeSamePeriodLastYear {
+		t.Fatalf("decoded %+v", report.Settings)
+	}
+
+	tax := true
+	if _, err := c.UpdateCostReport(context.Background(), "ws_1", "rpt_1", &UpdateCostReportInput{
+		Settings: &CostReportSettingsInput{IncludeTax: &tax},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	bare, _ := (*got)[2].Body["settings"].(map[string]any)
+	if _, sent := bare["comparisonMode"]; sent || len(bare) != 1 {
+		t.Fatalf("update settings = %v, want only includeTax", bare)
+	}
+}
+
+// A year-ago comparison says so, and a comparison the plan's history floor cut is withheld with
+// the floor it hit.
+func TestGetCostReportDataReadsTheYearAgoComparisonAndItsFloor(t *testing.T) {
+	c, _ := testClient(t,
+		stub{200, `{"summary":{},"series":[],"breakdown":[],"comparison":{"startDate":"2025-11-01","endDate":"2025-11-30",
+			"samePeriodLastYear":true,"series":[{"date":"2026-11-01","previousDate":"2025-11-01","cost":"4.00000000"}]}}`},
+		stub{200, `{"summary":{},"series":[],"breakdown":[],"comparison":null,"comparisonHistoryFloor":"2025-10-04"}`},
+		stub{200, `{"summary":{},"series":[],"breakdown":[],"comparison":{"startDate":"2026-10-01","endDate":"2026-10-31",
+			"samePeriodLastYear":false,"series":[]}}`})
+
+	yearAgo, err := c.GetCostReportData(context.Background(), "ws_1", "rpt_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if yearAgo.Comparison == nil || !yearAgo.Comparison.SamePeriodLastYear || yearAgo.Comparison.StartDate != "2025-11-01" ||
+		len(yearAgo.Comparison.Series) != 1 || yearAgo.ComparisonHistoryFloor != nil {
+		t.Fatalf("decoded %+v", yearAgo)
+	}
+
+	cut, err := c.GetCostReportData(context.Background(), "ws_1", "rpt_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cut.Comparison != nil || cut.ComparisonHistoryFloor == nil || *cut.ComparisonHistoryFloor != "2025-10-04" {
+		t.Fatalf("decoded %+v, want no comparison and its floor", cut)
+	}
+
+	previous, err := c.GetCostReportData(context.Background(), "ws_1", "rpt_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if previous.Comparison == nil || previous.Comparison.SamePeriodLastYear || previous.ComparisonHistoryFloor != nil {
+		t.Fatalf("decoded %+v, want the previous period", previous)
 	}
 }
 

@@ -47,8 +47,14 @@ type Client struct {
 	apiKey           string
 	workspaceID      string
 	userAgent        string
-	debug            bool
+	// agent is the AgentHeader value every request carries; empty for a client Agent did not make.
+	agent string
+	debug bool
 }
+
+// AgentHeader marks a request an AI agent's tool sends, as name/version. The API refuses a marked
+// write while the organization does not let AI agents create and change objects (Me.AgentWritesAllowed).
+const AgentHeader = "Costfluent-Agent"
 
 // NewClient creates a new Costfluent API client
 func NewClient(opts ...Option) *Client {
@@ -103,6 +109,19 @@ func NewClient(opts ...Option) *Client {
 func (c *Client) Workspace(workspaceID string) *Client {
 	clone := *c
 	clone.workspaceID = workspaceID
+	return &clone
+}
+
+// Agent returns a copy of the client, as Workspace makes one, whose every request carries
+// AgentHeader: name and the version the client's User-Agent reports, as name/version, or name alone
+// when the User-Agent names no version. The client it was made from sends no marker.
+func (c *Client) Agent(name string) *Client {
+	clone := *c
+	clone.agent = name
+	product, _, _ := strings.Cut(c.userAgent, " ")
+	if _, version, ok := strings.Cut(product, "/"); ok && version != "" {
+		clone.agent = name + "/" + version
+	}
 	return &clone
 }
 
