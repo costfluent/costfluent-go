@@ -166,33 +166,59 @@ func TestRateLimitBeyondTheRetryCapFailsFast(t *testing.T) {
 }
 
 // The timeout bounds each attempt, so a retried request is not cut off by the time its earlier
-// attempts and backoff took.
+// attempts and backoff took. The test reads each attempt's deadline rather than racing a slow
+// server against the timeout: a server delay inside the timeout leaves only the margin between
+// them for dialling and scheduling, which a loaded machine running the race detector overran.
+// Each attempt's deadline is set when that attempt starts, so the retry's comes no earlier than
+// the first attempt's end plus the timeout; one deadline over the whole call would come earlier.
 func TestTimeoutAppliesToEachAttempt(t *testing.T) {
-	var calls atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := calls.Add(1)
-		select {
-		case <-r.Context().Done():
-			return
-		case <-time.After(200 * time.Millisecond):
-		}
-		if n == 1 {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"id":"ws_1"}`)
-	}))
-	t.Cleanup(srv.Close)
-	c := NewClient(WithBaseURL(srv.URL), WithTimeout(300*time.Millisecond))
-	recordSleeps(c)
+	const timeout = time.Minute
+	for name, opts := range map[string]func(http.RoundTripper) []Option{
+		"WithTimeout": func(rt http.RoundTripper) []Option {
+			return []Option{WithHTTPClient(&http.Client{Transport: rt}), WithTimeout(timeout)}
+		},
+		"the caller's http.Client timeout": func(rt http.RoundTripper) []Option {
+			return []Option{WithHTTPClient(&http.Client{Transport: rt, Timeout: timeout})}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var deadlines []time.Time
+			var firstEnded time.Time
+			rt := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				deadline, ok := r.Context().Deadline()
+				if !ok {
+					t.Fatalf("attempt %d has no deadline", len(deadlines)+1)
+				}
+				deadlines = append(deadlines, deadline)
+				if len(deadlines) == 1 {
+					// The attempt takes measurable time, as a real one does, so a deadline set
+					// before it started falls short of its end plus the timeout.
+					time.Sleep(time.Millisecond)
+					firstEnded = time.Now()
+					return &http.Response{StatusCode: http.StatusServiceUnavailable, Body: http.NoBody, Request: r}, nil
+				}
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": {"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(`{"id":"ws_1"}`)),
+					Request:    r,
+				}, nil
+			})
+			c := NewClient(append(opts(rt), WithBaseURL("https://api.test"))...)
+			recordSleeps(c)
 
-	ws, err := c.GetWorkspace(context.Background(), "ws_1")
-	if err != nil {
-		t.Fatalf("err = %v; two 200ms attempts under a 300ms timeout", err)
-	}
-	if ws.ID != "ws_1" || calls.Load() != 2 {
-		t.Fatalf("got %+v after %d calls", ws, calls.Load())
+			ws, err := c.GetWorkspace(context.Background(), "ws_1")
+			if err != nil {
+				t.Fatalf("err = %v", err)
+			}
+			if ws.ID != "ws_1" || len(deadlines) != 2 {
+				t.Fatalf("got %+v after %d attempts", ws, len(deadlines))
+			}
+			if earliest := firstEnded.Add(timeout); deadlines[1].Before(earliest) {
+				t.Errorf("retry's deadline is %s before the first attempt's end plus the %s timeout; the timeout bounds the whole call",
+					earliest.Sub(deadlines[1]), timeout)
+			}
+		})
 	}
 }
 
@@ -602,6 +628,107 @@ func TestRetryStillResendsUnconditionalIdempotentRequests(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// scriptedClient is a client whose every attempt script answers, with a backoff short enough not
+// to wait in a test.
+func scriptedClient(script roundTripFunc) *Client {
+	c := NewClient(WithBaseURL("https://api.example.test"), WithAPIKey("key"))
+	rt := c.httpClient.Transport.(*retryTransport)
+	rt.baseDelay = time.Microsecond
+	rt.base = script
+	return c
+}
+
+func notFoundProblem(r *http.Request) *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusNotFound,
+		Header:     http.Header{"Content-Type": {"application/problem+json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"title":"Not Found","status":404,"code":"not_found"}`)),
+		Request:    r,
+	}
+}
+
+// The first DELETE removed the member and only its answer was lost: the resend finds nothing, and
+// the caller gets its not-found as the API answered it.
+func TestRetryReportsNotFoundWhenAResentDeleteFindsTheObjectGone(t *testing.T) {
+	for _, f := range retryFailures() {
+		t.Run(f.name, func(t *testing.T) {
+			var calls int
+			c := scriptedClient(func(r *http.Request) (*http.Response, error) {
+				calls++
+				if calls == 1 {
+					return f.fail(r)
+				}
+				return notFoundProblem(r), nil
+			})
+
+			err := c.RemoveTeamMember(context.Background(), "team_1", "usr_1")
+			if !IsNotFound(err) {
+				t.Fatalf("err = %v, want the resend's not-found", err)
+			}
+			if calls != 2 {
+				t.Fatalf("sent %d times, want 2", calls)
+			}
+		})
+	}
+}
+
+func TestRetryDoesNotResendADeleteTheAPIAnsweredNotFound(t *testing.T) {
+	var calls int
+	c := scriptedClient(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if calls == 1 {
+			return notFoundProblem(r), nil
+		}
+		return &http.Response{StatusCode: http.StatusNoContent, Body: http.NoBody, Request: r}, nil
+	})
+
+	err := c.RemoveTeamMember(context.Background(), "team_1", "usr_1")
+	if !IsNotFound(err) || calls != 1 {
+		t.Fatalf("err = %v after %d requests, want the not-found of the one request", err, calls)
+	}
+}
+
+// A 404 in the problem media type is the API's own answer, whatever its code: resending it gets the
+// same answer, and only the code not_found says the object is missing.
+func TestRetryDoesNotResendAnAPIErrorWhateverItsCode(t *testing.T) {
+	calls := map[string]func(c *Client) error{
+		http.MethodGet: func(c *Client) error {
+			_, err := c.GetWorkspace(context.Background(), "ws_1")
+			return err
+		},
+		http.MethodPut: func(c *Client) error {
+			_, err := c.UpdateWorkspace(context.Background(), "ws_1", &UpdateWorkspaceInput{})
+			return err
+		},
+		http.MethodDelete: func(c *Client) error {
+			return c.DeleteWorkspace(context.Background(), "ws_1")
+		},
+	}
+	for method, call := range calls {
+		t.Run(method, func(t *testing.T) {
+			var sent atomic.Int32
+			c := retryingClient(t, func(w http.ResponseWriter, r *http.Request) {
+				sent.Add(1)
+				if r.Method != method {
+					t.Errorf("method %s, want %s", r.Method, method)
+				}
+				w.Header().Set("Content-Type", "application/problem+json")
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = io.WriteString(w, `{"title":"Not Found","status":404,"code":"operation_not_found","retryable":false}`)
+			})
+
+			err := call(c)
+			if StatusCode(err) != http.StatusNotFound || IsNotFound(err) || IsRetryable(err) {
+				t.Fatalf("err = %v: IsNotFound %v, IsRetryable %v, want a final 404 that is neither",
+					err, IsNotFound(err), IsRetryable(err))
+			}
+			if sent.Load() != 1 {
+				t.Fatalf("sent %d times, want 1", sent.Load())
+			}
+		})
 	}
 }
 

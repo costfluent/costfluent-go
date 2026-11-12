@@ -66,6 +66,30 @@ func TestGetMeKeepsACapabilityTheSDKDoesNotList(t *testing.T) {
 	}
 }
 
+// The organization's agent-writes setting: an API that predates it leaves the field out, which must
+// read as off, so a client never offers writes the API will refuse.
+func TestGetMeReadsTheAgentWritesSetting(t *testing.T) {
+	for name, c := range map[string]struct {
+		body string
+		want bool
+	}{
+		"on":                       {`{"organizationId":"org_1","tokenType":"organization","tokenName":"ci","capabilities":[],"agentWritesAllowed":true}`, true},
+		"off":                      {`{"organizationId":"org_1","tokenType":"organization","tokenName":"ci","capabilities":[],"agentWritesAllowed":false}`, false},
+		"an API without the field": {`{"organizationId":"org_1","tokenType":"organization","tokenName":"ci","capabilities":[]}`, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			client, _ := testClient(t, stub{200, c.body})
+			me, err := client.GetMe(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if me.AgentWritesAllowed != c.want {
+				t.Errorf("AgentWritesAllowed = %v, want %v", me.AgentWritesAllowed, c.want)
+			}
+		})
+	}
+}
+
 func TestGetMeReturnsTheAPIError(t *testing.T) {
 	c, _ := testClient(t, stub{401, `{"title":"Authentication Error","status":401,"code":"unauthorized","retryable":false}`})
 

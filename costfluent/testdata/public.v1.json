@@ -6300,6 +6300,326 @@
         ]
       }
     },
+    "/v1/savings-items/{savingsItemId}/accept": {
+      "post": {
+        "tags": [
+          "Savings"
+        ],
+        "summary": "Accept savings finding",
+        "description": "Records that the workspace will act on an open finding, which moves it to accepted. Changes nothing in the cloud.\n\nNeeds a token with \u0060respondToSavingsItem\u0060 on the workspace.",
+        "operationId": "AcceptSavingsItem",
+        "parameters": [
+          {
+            "name": "savingsItemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SavingsItemPublicId"
+            }
+          },
+          {
+            "name": "workspaceId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/WorkspacePublicId"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "workspaceId is missing",
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "the finding is not open (conflict); nothing was changed",
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "No Content"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError",
+            "description": ""
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable",
+            "description": ""
+          },
+          "403": {
+            "description": "The API token lacks the operation\u0027s capability (missing_capability; errors[0] names it), is a workspace token naming another workspace or an organization-level operation, or belongs to an organization whose plan does not include API tokens (plan_upgrade_required; errors[0] names the plan that does)",
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource does not exist or is not visible to this token",
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests; retry after the Retry-After header, or the RateLimit-Reset header that carries the same seconds",
+            "headers": {
+              "RateLimit-Limit": {
+                "description": "Requests the limit that refused this one allows in its window",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0.0
+                }
+              },
+              "RateLimit-Remaining": {
+                "description": "Requests left in the window: 0 on a refusal",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0.0
+                }
+              },
+              "RateLimit-Reset": {
+                "description": "Seconds until the window frees a request",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0.0
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying, the same as RateLimit-Reset",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0.0
+                }
+              }
+            },
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiTokenAuth": []
+          }
+        ],
+        "x-costfluent-scope": "workspace",
+        "x-costfluent-capability": [
+          "respondToSavingsItem"
+        ]
+      }
+    },
+    "/v1/savings-items/{savingsItemId}/owner": {
+      "put": {
+        "tags": [
+          "Savings"
+        ],
+        "summary": "Assign savings finding owner",
+        "description": "Names who carries a finding, as free text. Any finding not rejected or withdrawn takes an owner, a provider\u0027s or a curated one included, and a provider\u0027s daily refresh keeps it. Changes nothing in the cloud.\n\nNeeds a token with \u0060manageSavingsItems\u0060 on the workspace.",
+        "operationId": "AssignSavingsItemOwner",
+        "parameters": [
+          {
+            "name": "savingsItemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SavingsItemPublicId"
+            }
+          },
+          {
+            "name": "workspaceId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/WorkspacePublicId"
+            }
+          }
+        ],
+        "requestBody": {
+          "x-name": "AssignSavingsItemOwnerRequest",
+          "description": "",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssignSavingsItemOwnerRequest"
+              }
+            }
+          },
+          "required": true,
+          "x-position": 1
+        },
+        "responses": {
+          "400": {
+            "description": "owner is missing, empty or longer than 200 characters",
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "the finding is rejected or withdrawn (conflict); nothing was changed",
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavingsItemResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError",
+            "description": ""
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable",
+            "description": ""
+          },
+          "403": {
+            "description": "The API token lacks the operation\u0027s capability (missing_capability; errors[0] names it), is a workspace token naming another workspace or an organization-level operation, or belongs to an organization whose plan does not include API tokens (plan_upgrade_required; errors[0] names the plan that does)",
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource does not exist or is not visible to this token",
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "The request body arrived too slowly and the server stopped reading it; send it again",
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is larger than this operation accepts",
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests; retry after the Retry-After header, or the RateLimit-Reset header that carries the same seconds",
+            "headers": {
+              "RateLimit-Limit": {
+                "description": "Requests the limit that refused this one allows in its window",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0.0
+                }
+              },
+              "RateLimit-Remaining": {
+                "description": "Requests left in the window: 0 on a refusal",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0.0
+                }
+              },
+              "RateLimit-Reset": {
+                "description": "Seconds until the window frees a request",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0.0
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying, the same as RateLimit-Reset",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0.0
+                }
+              }
+            },
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiTokenAuth": []
+          }
+        ],
+        "x-costfluent-scope": "workspace",
+        "x-costfluent-capability": [
+          "manageSavingsItems"
+        ]
+      }
+    },
     "/v1/savings-items/{savingsItemId}": {
       "get": {
         "tags": [
@@ -6437,13 +6757,153 @@
         ]
       }
     },
+    "/v1/savings-items/{savingsItemId}/implement": {
+      "post": {
+        "tags": [
+          "Savings"
+        ],
+        "summary": "Mark savings finding implemented",
+        "description": "Records that the change an accepted finding recommends was made, which moves it to implemented. Changes nothing in the cloud.\n\nNeeds a token with \u0060respondToSavingsItem\u0060 on the workspace.",
+        "operationId": "ImplementSavingsItem",
+        "parameters": [
+          {
+            "name": "savingsItemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SavingsItemPublicId"
+            }
+          },
+          {
+            "name": "workspaceId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/WorkspacePublicId"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "workspaceId is missing",
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "the finding is not accepted (conflict); nothing was changed",
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "No Content"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError",
+            "description": ""
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable",
+            "description": ""
+          },
+          "403": {
+            "description": "The API token lacks the operation\u0027s capability (missing_capability; errors[0] names it), is a workspace token naming another workspace or an organization-level operation, or belongs to an organization whose plan does not include API tokens (plan_upgrade_required; errors[0] names the plan that does)",
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource does not exist or is not visible to this token",
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests; retry after the Retry-After header, or the RateLimit-Reset header that carries the same seconds",
+            "headers": {
+              "RateLimit-Limit": {
+                "description": "Requests the limit that refused this one allows in its window",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0.0
+                }
+              },
+              "RateLimit-Remaining": {
+                "description": "Requests left in the window: 0 on a refusal",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0.0
+                }
+              },
+              "RateLimit-Reset": {
+                "description": "Seconds until the window frees a request",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0.0
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying, the same as RateLimit-Reset",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0.0
+                }
+              }
+            },
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiTokenAuth": []
+          }
+        ],
+        "x-costfluent-scope": "workspace",
+        "x-costfluent-capability": [
+          "respondToSavingsItem"
+        ]
+      }
+    },
     "/v1/savings-items": {
       "get": {
         "tags": [
           "Savings"
         ],
         "summary": "List savings findings",
-        "description": "Returns the workspace\u0027s savings queue: one tab\u0027s findings, or every status without one, narrowed by source, kind, the connection that generated them and a minimum monthly saving, newest first or largest saving first. Costfluent\u0027s curated findings are listed only on a plan that includes them. An unknown cloudAccountId matches no finding.\n\nNeeds a token with \u0060viewSavingsItems\u0060 on the workspace.",
+        "description": "Returns the workspace\u0027s savings queue: one tab\u0027s findings, or every status without one, narrowed by source, kind, the connection that generated them, the resources of a cost estimate and a minimum monthly saving, newest first or largest saving first. Costfluent\u0027s curated findings are listed only on a plan that includes them. costEstimateId lists the findings whose resource equals, ignoring case, an id on one of that estimate\u0027s resources. An unknown cloudAccountId or costEstimateId, or another workspace\u0027s estimate, matches no finding.\n\nNeeds a token with \u0060viewSavingsItems\u0060 on the workspace.",
         "operationId": "ListSavingsItems",
         "parameters": [
           {
@@ -6498,6 +6958,18 @@
               "oneOf": [
                 {
                   "$ref": "#/components/schemas/ProviderPublicId"
+                }
+              ]
+            }
+          },
+          {
+            "name": "costEstimateId",
+            "in": "query",
+            "schema": {
+              "nullable": true,
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/CostEstimatePublicId"
                 }
               ]
             }
@@ -6653,6 +7125,179 @@
         "x-costfluent-scope": "workspace",
         "x-costfluent-capability": [
           "viewSavingsItems"
+        ]
+      }
+    },
+    "/v1/savings-items/{savingsItemId}/reject": {
+      "post": {
+        "tags": [
+          "Savings"
+        ],
+        "summary": "Reject savings finding",
+        "description": "Declines an open or accepted finding with the reason the workspace gives, which moves it to rejected. Changes nothing in the cloud.\n\nNeeds a token with \u0060respondToSavingsItem\u0060 on the workspace.",
+        "operationId": "RejectSavingsItem",
+        "parameters": [
+          {
+            "name": "savingsItemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SavingsItemPublicId"
+            }
+          },
+          {
+            "name": "workspaceId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/WorkspacePublicId"
+            }
+          }
+        ],
+        "requestBody": {
+          "x-name": "RejectSavingsItemRequest",
+          "description": "",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectSavingsItemRequest"
+              }
+            }
+          },
+          "required": true,
+          "x-position": 1
+        },
+        "responses": {
+          "400": {
+            "description": "workspaceId is missing, or reason is missing, empty or longer than 1000 characters",
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "the finding is implemented, verified, rejected or withdrawn (conflict); nothing was changed",
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "No Content"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError",
+            "description": ""
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable",
+            "description": ""
+          },
+          "403": {
+            "description": "The API token lacks the operation\u0027s capability (missing_capability; errors[0] names it), is a workspace token naming another workspace or an organization-level operation, or belongs to an organization whose plan does not include API tokens (plan_upgrade_required; errors[0] names the plan that does)",
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource does not exist or is not visible to this token",
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "The request body arrived too slowly and the server stopped reading it; send it again",
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is larger than this operation accepts",
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests; retry after the Retry-After header, or the RateLimit-Reset header that carries the same seconds",
+            "headers": {
+              "RateLimit-Limit": {
+                "description": "Requests the limit that refused this one allows in its window",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0.0
+                }
+              },
+              "RateLimit-Remaining": {
+                "description": "Requests left in the window: 0 on a refusal",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0.0
+                }
+              },
+              "RateLimit-Reset": {
+                "description": "Seconds until the window frees a request",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0.0
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying, the same as RateLimit-Reset",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0.0
+                }
+              }
+            },
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiTokenAuth": []
+          }
+        ],
+        "x-costfluent-scope": "workspace",
+        "x-costfluent-capability": [
+          "respondToSavingsItem"
         ]
       }
     },
@@ -8532,6 +9177,125 @@
         ]
       }
     },
+    "/v1/providers/{providerId}/collection-status": {
+      "get": {
+        "tags": [
+          "Providers"
+        ],
+        "summary": "Get provider collection status",
+        "description": "Returns one cost source\u0027s status with its months, newest first, back to the plan\u0027s history horizon: each month\u0027s rows, billed amount per currency, the latest restatement and the comparison with the provider\u0027s own total, and the days (or months) no committed collection covered. Missing means nothing was collected, not that the provider had no cost. Amounts are null, with amountsWithheldReason set, unless the token manages providers or reads the whole connection\u0027s cost; a source without a provider total says so in providerTotal.status rather than showing 0.\n\nNeeds an organization token with \u0060viewProviders\u0060.",
+        "operationId": "GetProviderCollectionStatus",
+        "parameters": [
+          {
+            "name": "providerId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ProviderPublicId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionStatusResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError",
+            "description": ""
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable",
+            "description": ""
+          },
+          "403": {
+            "description": "The API token lacks the operation\u0027s capability (missing_capability; errors[0] names it), is a workspace token naming another workspace or an organization-level operation, or belongs to an organization whose plan does not include API tokens (plan_upgrade_required; errors[0] names the plan that does)",
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource does not exist or is not visible to this token",
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests; retry after the Retry-After header, or the RateLimit-Reset header that carries the same seconds",
+            "headers": {
+              "RateLimit-Limit": {
+                "description": "Requests the limit that refused this one allows in its window",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0.0
+                }
+              },
+              "RateLimit-Remaining": {
+                "description": "Requests left in the window: 0 on a refusal",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0.0
+                }
+              },
+              "RateLimit-Reset": {
+                "description": "Seconds until the window frees a request",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0.0
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying, the same as RateLimit-Reset",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0.0
+                }
+              }
+            },
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiTokenAuth": []
+          }
+        ],
+        "x-costfluent-scope": "organization",
+        "x-costfluent-capability": [
+          "viewProviders"
+        ]
+      }
+    },
     "/v1/providers/{providerId}/sync-history": {
       "get": {
         "tags": [
@@ -8577,6 +9341,147 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PaginatedResponseOfSyncHistoryEntryResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError",
+            "description": ""
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable",
+            "description": ""
+          },
+          "400": {
+            "description": "A query value cannot be read, or page \u00D7 limit passes the furthest a list reaches (validation_failed; errors[0] names the value)",
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API token lacks the operation\u0027s capability (missing_capability; errors[0] names it), is a workspace token naming another workspace or an organization-level operation, or belongs to an organization whose plan does not include API tokens (plan_upgrade_required; errors[0] names the plan that does)",
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource does not exist or is not visible to this token",
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests; retry after the Retry-After header, or the RateLimit-Reset header that carries the same seconds",
+            "headers": {
+              "RateLimit-Limit": {
+                "description": "Requests the limit that refused this one allows in its window",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0.0
+                }
+              },
+              "RateLimit-Remaining": {
+                "description": "Requests left in the window: 0 on a refusal",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0.0
+                }
+              },
+              "RateLimit-Reset": {
+                "description": "Seconds until the window frees a request",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0.0
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying, the same as RateLimit-Reset",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0.0
+                }
+              }
+            },
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiTokenAuth": []
+          }
+        ],
+        "x-costfluent-scope": "organization",
+        "x-costfluent-capability": [
+          "viewProviders"
+        ]
+      }
+    },
+    "/v1/providers/collection-status": {
+      "get": {
+        "tags": [
+          "Providers"
+        ],
+        "summary": "List collection status",
+        "description": "Returns every cost source of the organization, by name, with how its cost arrives (cadence), when it last imported, the day its data covers through, when its next delivery is due and whether it is late. Late is when the stale-data notice goes out. A source delivered on upload, or a connection that is not collecting, has no next delivery. Kubernetes clusters are not listed.\n\nNeeds an organization token with \u0060viewProviders\u0060.",
+        "operationId": "ListCollectionStatus",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "description": "The page to return, counted from 1. A page below 1 reads page 1; one past the last returns no items.",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Items per page, from 1 to 100. A larger value is clamped to 100, a smaller one to 1.",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponseOfCollectionStatusSummaryResponse"
                 }
               }
             }
@@ -12989,7 +13894,7 @@
           "Custom Provider"
         ],
         "summary": "Upload cost files",
-        "description": "Uploads one run of a FOCUS cost export to a custom provider: every file of the run in a repeated multipart field \u0060file\u0060, each .csv or .csv.gz with the same header, up to 90 MB together. The upload is accepted as pending and processed in the background; if any row is invalid nothing is committed and the upload fails with its errors. A completed upload replaces the provider\u0027s cost for every day from its first charge to its last. Its rows count toward the organization\u0027s monthly volume, one row for each day a cost is spread over, and the upload is checked whole before any day is committed: one that would pass a monthly volume limit set for the organization, or is processed while ingestion is paused, fails and commits nothing.\n\nNeeds an organization token with \u0060manageProviders\u0060.",
+        "description": "Uploads one run of a FOCUS cost export to a custom provider: every file of the run in a repeated multipart field \u0060file\u0060, each .csv or .csv.gz with the same header, up to 90 MB together. The upload is accepted as pending and processed in the background; if any row is invalid nothing is committed and the upload fails with its errors. A completed upload replaces the provider\u0027s cost for every day from its first charge to its last. Its rows count toward the organization\u0027s monthly volume, one row for each day a cost is spread over, and the upload is checked whole before any day is committed: one that would pass a monthly volume limit set for the organization, or is processed while ingestion is paused, fails and commits nothing. An organization has at most 5 uploads waiting or being processed at once, one deleted before it finished counting for 5 minutes after the delete; a further upload, or one sent once its custom connections have committed the day\u0027s cost records or bytes, is refused with 429 and nothing is stored.\n\nNeeds an organization token with \u0060manageProviders\u0060.",
         "operationId": "UploadCustomCosts",
         "parameters": [
           {
@@ -13027,6 +13932,46 @@
           },
           "422": {
             "description": "Nothing was stored: ingestion is paused for the organization (invalid_state), or the provider is paused because the organization has more connections than the limit set for it (limit_exceeded)",
+            "content": {
+              "application/problem\u002Bjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Nothing was stored: the token\u0027s request budget is spent, the organization already has 5 uploads waiting or being processed (retry once one finishes), or its custom connections have committed the day\u0027s cost records or bytes (retry after midnight UTC); retry after the Retry-After header",
+            "headers": {
+              "RateLimit-Limit": {
+                "description": "Requests the limit that refused this one allows in its window",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0.0
+                }
+              },
+              "RateLimit-Remaining": {
+                "description": "Requests left in the window: 0 on a refusal",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0.0
+                }
+              },
+              "RateLimit-Reset": {
+                "description": "Seconds until the window frees a request",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0.0
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying, the same as RateLimit-Reset",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0.0
+                }
+              }
+            },
             "content": {
               "application/problem\u002Bjson": {
                 "schema": {
@@ -13102,46 +14047,6 @@
                 }
               }
             }
-          },
-          "429": {
-            "description": "Too many requests; retry after the Retry-After header, or the RateLimit-Reset header that carries the same seconds",
-            "headers": {
-              "RateLimit-Limit": {
-                "description": "Requests the limit that refused this one allows in its window",
-                "schema": {
-                  "type": "integer",
-                  "minimum": 0.0
-                }
-              },
-              "RateLimit-Remaining": {
-                "description": "Requests left in the window: 0 on a refusal",
-                "schema": {
-                  "type": "integer",
-                  "minimum": 0.0
-                }
-              },
-              "RateLimit-Reset": {
-                "description": "Seconds until the window frees a request",
-                "schema": {
-                  "type": "integer",
-                  "minimum": 0.0
-                }
-              },
-              "Retry-After": {
-                "description": "Seconds to wait before retrying, the same as RateLimit-Reset",
-                "schema": {
-                  "type": "integer",
-                  "minimum": 0.0
-                }
-              }
-            },
-            "content": {
-              "application/problem\u002Bjson": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
           }
         },
         "security": [
@@ -13159,7 +14064,7 @@
           "Custom Provider"
         ],
         "summary": "List uploads",
-        "description": "Returns a custom provider\u0027s uploads, newest first, each with the days it covers and what it billed.\n\nNeeds an organization token with \u0060viewProviders\u0060.",
+        "description": "Returns a custom provider\u0027s uploads, newest first, each with the days it covers and what it billed. billedTotals is null unless the token has manageProviders, or viewCosts in workspaces that together read the whole connection.\n\nNeeds an organization token with \u0060viewProviders\u0060.",
         "operationId": "ListCustomCostUploads",
         "parameters": [
           {
@@ -13308,7 +14213,7 @@
           "Custom Provider"
         ],
         "summary": "Get upload",
-        "description": "Returns one upload with its status and, when it failed, the first errors of its report.\n\nNeeds an organization token with \u0060viewProviders\u0060.",
+        "description": "Returns one upload with its status and, when it failed, the first errors of its report. billedTotals is null unless the token has manageProviders, or viewCosts in workspaces that together read the whole connection.\n\nNeeds an organization token with \u0060viewProviders\u0060.",
         "operationId": "GetCustomCostUpload",
         "parameters": [
           {
@@ -13553,7 +14458,7 @@
           "Custom Provider"
         ],
         "summary": "Submit costs batch",
-        "description": "Submits a batch of cost records to a custom provider. A batch that another submission or upload for the same provider overtook while it ran answers 409 concurrency_conflict and commits nothing; send it again. Submitted costs count toward the organization\u0027s monthly volume, one row for each day a cost is spread over, and the batch is checked whole: one that would pass a monthly volume limit set for the organization commits nothing. Each entry becomes one daily record per day of its charge period; a request may become at most 37,500 records and, counting a spread entry once per day, 48 MiB of entries, and is refused with 400 otherwise.\n\nNeeds an organization token with \u0060syncProviders\u0060 for every request, and \u0060manageProviders\u0060 as well when it replaces lines (replaceLines: true), which removes their earlier days.",
+        "description": "Submits a batch of cost records to a custom provider. A batch that another submission or upload for the same provider overtook while it ran answers 409 concurrency_conflict and commits nothing; send it again. Submitted costs count toward the organization\u0027s monthly volume, one row for each day a cost is spread over, and the batch is checked whole: one that would pass a monthly volume limit set for the organization commits nothing. Each entry becomes one daily record per day of its charge period; a request may become at most 7,500 records and, counting a spread entry once per day, 10,000,000 bytes of entries, and is refused with 400 otherwise.\n\nNeeds an organization token with \u0060syncProviders\u0060 for every request, and \u0060manageProviders\u0060 as well when it replaces lines (replaceLines: true), which removes their earlier days.",
         "operationId": "SubmitCosts",
         "parameters": [
           {
@@ -15742,7 +16647,7 @@
           "Cost Reports"
         ],
         "summary": "Get cost report data",
-        "description": "Returns the computed cost data for a report. A breakdown row\u0027s \u0060percent\u0060 is its share of the window\u0027s total cost; with conversion off over several currencies, of the total in its own currency.\n\nNeeds a token with \u0060viewCosts\u0060 on the workspace.",
+        "description": "Returns the computed cost data for a report. A breakdown row\u0027s \u0060percent\u0060 is its share of the window\u0027s total cost; with conversion off over several currencies, of the total in its own currency.\n\nNeeds a token with \u0060viewCosts\u0060 on the workspace for every report, and \u0060viewCostReports\u0060 too for a report that charts a business metric.",
         "operationId": "GetCostReportData",
         "parameters": [
           {
@@ -15879,7 +16784,8 @@
         ],
         "x-costfluent-scope": "workspace",
         "x-costfluent-capability": [
-          "viewCosts"
+          "viewCosts",
+          "viewCostReports"
         ]
       }
     },
@@ -16760,7 +17666,7 @@
             "in": "query",
             "schema": {
               "type": "boolean",
-              "default": true
+              "default": false
             }
           },
           {
@@ -17173,7 +18079,7 @@
             "in": "query",
             "schema": {
               "type": "boolean",
-              "default": true
+              "default": false
             }
           },
           {
@@ -21193,7 +22099,7 @@
           "Billing"
         ],
         "summary": "Get the account\u0027s metered usage",
-        "description": "The same numbers the caps are enforced against, so a script can check headroom rather than discover a limit by being refused.\n\nNeeds an organization token with \u0060viewOrganization\u0060.",
+        "description": "The same numbers the caps are enforced against, so a script can check headroom rather than discover a limit by being refused. \u0060trackedSpend\u0060, \u0060averageTrackedSpend\u0060 and each history month\u0027s \u0060trackedSpend\u0060 are null unless the token reads costs across the whole organization: an organization token issued \u0060viewCosts\u0060 by a current Owner, or one the organization owns. The counters, the currency and the band stay readable to every token. A null \u0060averageTrackedSpend\u0060 beside a non-null \u0060trackedSpend\u0060 means the average is not measured yet.\n\nNeeds an organization token with \u0060viewOrganization\u0060.",
         "operationId": "GetUsage",
         "responses": {
           "200": {
@@ -26266,6 +27172,7 @@
           "AzureOpenAi",
           "AwsBedrock",
           "VertexAi",
+          "Cursor",
           "Twilio",
           "SendGrid",
           "Mailgun",
@@ -26340,6 +27247,7 @@
           "azureOpenAi",
           "awsBedrock",
           "vertexAi",
+          "cursor",
           "twilio",
           "sendGrid",
           "mailgun",
@@ -26670,7 +27578,8 @@
           "organizationId",
           "tokenType",
           "tokenName",
-          "capabilities"
+          "capabilities",
+          "agentWritesAllowed"
         ],
         "properties": {
           "organizationId": {
@@ -26707,6 +27616,9 @@
             "items": {
               "$ref": "#/components/schemas/ApiTokenCapability"
             }
+          },
+          "agentWritesAllowed": {
+            "type": "boolean"
           }
         }
       },
@@ -26785,6 +27697,7 @@
           "ViewAuditLog",
           "ViewSavingsItems",
           "ManageSavingsItems",
+          "RespondToSavingsItem",
           "ViewCostAllocation",
           "ManageCostAllocation",
           "ManageBusinessMetrics"
@@ -26843,6 +27756,7 @@
           "viewAuditLog",
           "viewSavingsItems",
           "manageSavingsItems",
+          "respondToSavingsItem",
           "viewCostAllocation",
           "manageCostAllocation",
           "manageBusinessMetrics"
@@ -27665,6 +28579,7 @@
           "Storage",
           "CommitmentPurchase",
           "ExtendedSupport",
+          "PricingTier",
           "Other"
         ],
         "x-extensible-enum": [
@@ -27674,6 +28589,7 @@
           "storage",
           "commitmentPurchase",
           "extendedSupport",
+          "pricingTier",
           "other"
         ]
       },
@@ -27819,6 +28735,14 @@
           }
         }
       },
+      "SavingsItemActionRequest": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "SavingsItemPublicId": {
+        "type": "string",
+        "pattern": "^sav_[A-Za-z0-9_-]{22}$"
+      },
       "SavingsItemResponse": {
         "type": "object",
         "additionalProperties": false,
@@ -27962,10 +28886,6 @@
           }
         }
       },
-      "SavingsItemPublicId": {
-        "type": "string",
-        "pattern": "^sav_[A-Za-z0-9_-]{22}$"
-      },
       "SavingsItemRating": {
         "type": "string",
         "description": "",
@@ -28016,6 +28936,21 @@
           "inconclusive"
         ]
       },
+      "AssignSavingsItemOwnerRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "owner"
+        ],
+        "properties": {
+          "owner": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 0,
+            "nullable": false
+          }
+        }
+      },
       "GetSavingsItemRequest": {
         "type": "object",
         "additionalProperties": false
@@ -28050,6 +28985,10 @@
           }
         ]
       },
+      "CostEstimatePublicId": {
+        "type": "string",
+        "pattern": "^est_[A-Za-z0-9_-]{22}$"
+      },
       "SavingsQueueSort": {
         "type": "string",
         "description": "",
@@ -28061,6 +29000,21 @@
           "newest",
           "largestSaving"
         ]
+      },
+      "RejectSavingsItemRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "reason"
+        ],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 0,
+            "nullable": false
+          }
+        }
       },
       "SavedFilterCreatedResponse": {
         "type": "object",
@@ -28402,6 +29356,362 @@
           }
         }
       },
+      "CollectionStatusResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "summary",
+          "months",
+          "missing"
+        ],
+        "properties": {
+          "summary": {
+            "$ref": "#/components/schemas/CollectionStatusSummaryResponse"
+          },
+          "amountsWithheldReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "months": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CollectionMonthResponse"
+            }
+          },
+          "missing": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MissingRangeResponse"
+            }
+          }
+        }
+      },
+      "CollectionStatusSummaryResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "providerId",
+          "name",
+          "key",
+          "status",
+          "cadence",
+          "period",
+          "hasProviderTotal",
+          "isLate",
+          "awaitingFirstImport"
+        ],
+        "properties": {
+          "providerId": {
+            "$ref": "#/components/schemas/ProviderPublicId"
+          },
+          "name": {
+            "type": "string"
+          },
+          "key": {
+            "$ref": "#/components/schemas/ProviderKey"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ProviderStatus"
+          },
+          "cadence": {
+            "$ref": "#/components/schemas/DeliveryCadence"
+          },
+          "period": {
+            "$ref": "#/components/schemas/DeliveryPeriod"
+          },
+          "hasProviderTotal": {
+            "type": "boolean"
+          },
+          "lastImportedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "dataThrough": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "nextDelivery": {
+            "nullable": true,
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NextDeliveryResponse"
+              }
+            ]
+          },
+          "daysOverdue": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "isLate": {
+            "type": "boolean"
+          },
+          "awaitingFirstImport": {
+            "type": "boolean"
+          },
+          "lastSyncStatus": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "ProviderStatus": {
+        "type": "string",
+        "description": "",
+        "x-enumNames": [
+          "Pending",
+          "Connecting",
+          "Active",
+          "Syncing",
+          "Error",
+          "Disabled"
+        ],
+        "x-extensible-enum": [
+          "pending",
+          "connecting",
+          "active",
+          "syncing",
+          "error",
+          "disabled"
+        ]
+      },
+      "DeliveryCadence": {
+        "type": "string",
+        "description": "",
+        "x-enumNames": [
+          "Hourly",
+          "Daily",
+          "MonthToDate",
+          "MonthlyInvoice",
+          "OnUpload"
+        ],
+        "x-extensible-enum": [
+          "hourly",
+          "daily",
+          "monthToDate",
+          "monthlyInvoice",
+          "onUpload"
+        ]
+      },
+      "DeliveryPeriod": {
+        "type": "string",
+        "description": "",
+        "x-enumNames": [
+          "Day",
+          "Month"
+        ],
+        "x-extensible-enum": [
+          "day",
+          "month"
+        ]
+      },
+      "NextDeliveryResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "startDate",
+          "endDate",
+          "dueOn"
+        ],
+        "properties": {
+          "startDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "endDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "dueOn": {
+            "type": "string",
+            "format": "date"
+          }
+        }
+      },
+      "CollectionMonthResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "month",
+          "isImported",
+          "recordCount",
+          "onRequest",
+          "providerTotal"
+        ],
+        "properties": {
+          "month": {
+            "type": "string",
+            "format": "date"
+          },
+          "isImported": {
+            "type": "boolean"
+          },
+          "recordCount": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "lastImportedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "onRequest": {
+            "type": "boolean"
+          },
+          "restatement": {
+            "nullable": true,
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RestatementResponse"
+              }
+            ]
+          },
+          "amounts": {
+            "type": "array",
+            "nullable": true,
+            "items": {
+              "$ref": "#/components/schemas/MonthAmountResponse"
+            }
+          },
+          "providerTotal": {
+            "$ref": "#/components/schemas/ProviderTotalResponse"
+          }
+        }
+      },
+      "RestatementResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "lastCommittedAt",
+          "records"
+        ],
+        "properties": {
+          "lastCommittedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "records": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "MonthAmountResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "currency",
+          "amount"
+        ],
+        "properties": {
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "amount": {
+            "type": "string",
+            "format": "decimal",
+            "pattern": "^-?[0-9]\u002B(\\.[0-9]{1,8})?$"
+          }
+        }
+      },
+      "ProviderTotalResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/ProviderTotalStatus"
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true
+          },
+          "providerAmount": {
+            "type": "string",
+            "format": "decimal",
+            "pattern": "^-?[0-9]\u002B(\\.[0-9]{1,8})?$",
+            "nullable": true
+          },
+          "costfluentAmount": {
+            "type": "string",
+            "format": "decimal",
+            "pattern": "^-?[0-9]\u002B(\\.[0-9]{1,8})?$",
+            "nullable": true
+          },
+          "difference": {
+            "type": "string",
+            "format": "decimal",
+            "pattern": "^-?[0-9]\u002B(\\.[0-9]{1,8})?$",
+            "nullable": true
+          },
+          "tolerance": {
+            "type": "string",
+            "format": "decimal",
+            "pattern": "^-?[0-9]\u002B(\\.[0-9]{1,8})?$",
+            "nullable": true
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$",
+            "nullable": true
+          },
+          "comparedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
+      "ProviderTotalStatus": {
+        "type": "string",
+        "description": "",
+        "x-enumNames": [
+          "Agrees",
+          "Differs",
+          "NoData",
+          "NotCompared",
+          "NoProviderTotal"
+        ],
+        "x-extensible-enum": [
+          "agrees",
+          "differs",
+          "noData",
+          "notCompared",
+          "noProviderTotal"
+        ]
+      },
+      "MissingRangeResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "startDate",
+          "endDate",
+          "scopes"
+        ],
+        "properties": {
+          "startDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "endDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "scopes": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "GetProviderCollectionStatusRequest": {
+        "type": "object",
+        "additionalProperties": false
+      },
       "ProviderResponse": {
         "type": "object",
         "additionalProperties": false,
@@ -28479,26 +29789,6 @@
           }
         }
       },
-      "ProviderStatus": {
-        "type": "string",
-        "description": "",
-        "x-enumNames": [
-          "Pending",
-          "Connecting",
-          "Active",
-          "Syncing",
-          "Error",
-          "Disabled"
-        ],
-        "x-extensible-enum": [
-          "pending",
-          "connecting",
-          "active",
-          "syncing",
-          "error",
-          "disabled"
-        ]
-      },
       "GetProviderRequest": {
         "type": "object",
         "additionalProperties": false
@@ -28559,6 +29849,36 @@
         }
       },
       "GetProviderSyncHistoryRequest": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/PaginatedRequest"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false
+          }
+        ]
+      },
+      "PaginatedResponseOfCollectionStatusSummaryResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "links",
+          "data"
+        ],
+        "properties": {
+          "links": {
+            "$ref": "#/components/schemas/PaginationLinks"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CollectionStatusSummaryResponse"
+            }
+          }
+        }
+      },
+      "ListCollectionStatusRequest": {
         "allOf": [
           {
             "$ref": "#/components/schemas/PaginatedRequest"
@@ -28933,6 +30253,14 @@
           "window_end": {
             "type": "string",
             "format": "date-time"
+          },
+          "unscraped_nodes": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int32"
+            }
           },
           "nodes": {
             "type": "array",
@@ -30712,7 +32040,12 @@
             "nullable": true
           },
           "chartType": {
-            "$ref": "#/components/schemas/ChartType"
+            "default": "stackedBar",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ChartType"
+              }
+            ]
           },
           "chartAxis": {
             "nullable": true,
@@ -30935,6 +32268,14 @@
             "type": "integer",
             "format": "int32",
             "nullable": true
+          },
+          "comparisonMode": {
+            "nullable": true,
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ComparisonMode"
+              }
+            ]
           }
         }
       },
@@ -30989,6 +32330,18 @@
           "metricValue"
         ]
       },
+      "ComparisonMode": {
+        "type": "string",
+        "description": "",
+        "x-enumNames": [
+          "PreviousPeriod",
+          "SamePeriodLastYear"
+        ],
+        "x-extensible-enum": [
+          "previousPeriod",
+          "samePeriodLastYear"
+        ]
+      },
       "DeleteCostReportRequest": {
         "type": "object",
         "additionalProperties": false
@@ -31040,6 +32393,11 @@
               }
             ]
           },
+          "comparisonHistoryFloor": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
           "forecast": {
             "nullable": true,
             "oneOf": [
@@ -31060,6 +32418,27 @@
                 "$ref": "#/components/schemas/ReportUnitCostResponse"
               }
             ]
+          },
+          "resourceNames": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "accountNames": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "clusterNames": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": {
+              "type": "string"
+            }
           }
         }
       },
@@ -31314,6 +32693,11 @@
             "type": "number",
             "format": "double",
             "nullable": true
+          },
+          "unitPrice": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
           }
         }
       },
@@ -31323,7 +32707,8 @@
         "required": [
           "series",
           "startDate",
-          "endDate"
+          "endDate",
+          "samePeriodLastYear"
         ],
         "properties": {
           "startDate": {
@@ -31339,6 +32724,9 @@
             "items": {
               "$ref": "#/components/schemas/ReportComparisonPointResponse"
             }
+          },
+          "samePeriodLastYear": {
+            "type": "boolean"
           }
         }
       },
@@ -31602,7 +32990,8 @@
           "measure",
           "unitCostLabelFilter",
           "unitCostCalculation",
-          "unitCostScale"
+          "unitCostScale",
+          "comparisonMode"
         ],
         "properties": {
           "includeCredits": {
@@ -31656,6 +33045,9 @@
           "unitCostScale": {
             "type": "integer",
             "format": "int32"
+          },
+          "comparisonMode": {
+            "$ref": "#/components/schemas/ComparisonMode"
           }
         }
       },
@@ -31839,12 +33231,16 @@
             "type": "string",
             "format": "date",
             "nullable": true
+          },
+          "planned": {
+            "nullable": true,
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CostEstimatePlannedResponse"
+              }
+            ]
           }
         }
-      },
-      "CostEstimatePublicId": {
-        "type": "string",
-        "pattern": "^est_[A-Za-z0-9_-]{22}$"
       },
       "CostEstimateState": {
         "type": "string",
@@ -31863,6 +33259,37 @@
           "inconclusive",
           "expired"
         ]
+      },
+      "CostEstimatePlannedResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "monthlyCostBefore",
+          "monthlyCostAfter",
+          "monthlyChange",
+          "unpricedResources"
+        ],
+        "properties": {
+          "monthlyCostBefore": {
+            "type": "string",
+            "format": "decimal",
+            "pattern": "^-?[0-9]\u002B(\\.[0-9]{1,8})?$"
+          },
+          "monthlyCostAfter": {
+            "type": "string",
+            "format": "decimal",
+            "pattern": "^-?[0-9]\u002B(\\.[0-9]{1,8})?$"
+          },
+          "monthlyChange": {
+            "type": "string",
+            "format": "decimal",
+            "pattern": "^-?[0-9]\u002B(\\.[0-9]{1,8})?$"
+          },
+          "unpricedResources": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
       },
       "ApplyCostEstimateRequest": {
         "type": "object",
@@ -32068,37 +33495,6 @@
           "accountsStoppedReporting",
           "dataNeverCovered"
         ]
-      },
-      "CostEstimatePlannedResponse": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "monthlyCostBefore",
-          "monthlyCostAfter",
-          "monthlyChange",
-          "unpricedResources"
-        ],
-        "properties": {
-          "monthlyCostBefore": {
-            "type": "string",
-            "format": "decimal",
-            "pattern": "^-?[0-9]\u002B(\\.[0-9]{1,8})?$"
-          },
-          "monthlyCostAfter": {
-            "type": "string",
-            "format": "decimal",
-            "pattern": "^-?[0-9]\u002B(\\.[0-9]{1,8})?$"
-          },
-          "monthlyChange": {
-            "type": "string",
-            "format": "decimal",
-            "pattern": "^-?[0-9]\u002B(\\.[0-9]{1,8})?$"
-          },
-          "unpricedResources": {
-            "type": "integer",
-            "format": "int32"
-          }
-        }
       },
       "CostEstimateActualResponse": {
         "type": "object",
@@ -32783,6 +34179,11 @@
           },
           "providerKey": {
             "$ref": "#/components/schemas/ProviderKey"
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$",
+            "nullable": true
           },
           "cost": {
             "type": "string",
@@ -34482,6 +35883,14 @@
           "ingestionHaltedReason": {
             "type": "string"
           },
+          "ingestionHaltCause": {
+            "nullable": true,
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/IngestionHaltCause"
+              }
+            ]
+          },
           "bandPlanCode": {
             "type": "string",
             "nullable": true
@@ -34501,6 +35910,20 @@
             }
           }
         }
+      },
+      "IngestionHaltCause": {
+        "type": "string",
+        "description": "",
+        "x-enumNames": [
+          "Operator",
+          "Unpaid",
+          "CollectionPausedAboveBand"
+        ],
+        "x-extensible-enum": [
+          "operator",
+          "unpaid",
+          "collectionPausedAboveBand"
+        ]
       },
       "PlanLadderEntryResponse": {
         "type": "object",
@@ -34565,9 +35988,9 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
+          "trackedSpend",
           "periodStart",
           "currency",
-          "trackedSpend",
           "isSpendComplete",
           "unconvertedCurrencies",
           "rowsIngested",
@@ -34584,11 +36007,6 @@
           "currency": {
             "type": "string",
             "pattern": "^[A-Z]{3}$"
-          },
-          "trackedSpend": {
-            "type": "string",
-            "format": "decimal",
-            "pattern": "^-?[0-9]\u002B(\\.[0-9]{1,8})?$"
           },
           "isSpendComplete": {
             "type": "boolean"
@@ -34635,6 +36053,12 @@
             "items": {
               "$ref": "#/components/schemas/UsageHistoryEntryResponse"
             }
+          },
+          "trackedSpend": {
+            "type": "string",
+            "format": "decimal",
+            "pattern": "^-?[0-9]\u002B(\\.[0-9]{1,8})?$",
+            "nullable": true
           }
         }
       },
@@ -34642,8 +36066,8 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "periodStart",
           "trackedSpend",
+          "periodStart",
           "rowsIngested",
           "bytesStored"
         ],
@@ -34652,11 +36076,6 @@
             "type": "string",
             "format": "date"
           },
-          "trackedSpend": {
-            "type": "string",
-            "format": "decimal",
-            "pattern": "^-?[0-9]\u002B(\\.[0-9]{1,8})?$"
-          },
           "rowsIngested": {
             "type": "integer",
             "format": "int64"
@@ -34664,6 +36083,12 @@
           "bytesStored": {
             "type": "integer",
             "format": "int64"
+          },
+          "trackedSpend": {
+            "type": "string",
+            "format": "decimal",
+            "pattern": "^-?[0-9]\u002B(\\.[0-9]{1,8})?$",
+            "nullable": true
           }
         }
       },

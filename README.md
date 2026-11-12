@@ -149,6 +149,11 @@ and every create, but not for a trigger, which would run twice if it reached the
 response was lost. A 404 that is not the API's `application/problem+json` comes from the proxy in
 front of the API, which answers `404 page not found` while a container is recreated: it is retried
 as a 5xx is, is `IsRetryable(err)` when it outlasts the retries, and is never `IsNotFound(err)`.
+A DELETE without `IfMatch` is resent too: when its first attempt removed the object and only the
+answer was lost, the resend answers not found. After a delete, `IsNotFound(err)` means no such
+object is visible to the token: it was removed, by an earlier attempt or anyone else, or the id is
+wrong or out of the token's reach. Treat it as done only when the id came from this token's own
+read.
 Every create sends a new `Idempotency-Key` and resends it on each retry, so the
 API answers a retried create with the first response instead of creating twice;
 `IsIdempotencyKeyReused(err)` is true when the API refuses a key already used with another request.
@@ -178,7 +183,8 @@ the version.
 paging reaches `CostDataMaxRows` (100,000) rows: a larger read splits its date window.
 
 Error helper functions:
-- `IsNotFound(err)` - 404 problem details from the API: the object does not exist or is not visible
+- `IsNotFound(err)` - a 404 the API answers with the code `not_found`: the object does not exist or is not visible
+  to the token. A proxy's 404, or a 404 the API answers with another code, is not a missing object
 - `IsConflict(err)` - 409
 - `IsPreconditionFailed(err)` - 412, an `IfMatch` that is no longer current
 - `IsIdempotencyKeyReused(err)` - 422, an `Idempotency-Key` already used with another request
@@ -226,7 +232,7 @@ Error helper functions:
 - `PauseCostAlert`, `ResumeCostAlert`
 
 ### Cost Reports
-- `ListCostReports`, `GetCostReport`, `CreateCostReport`, `UpdateCostReport`, `DeleteCostReport`
+- `ListCostReports`, `ListCostReportsPage`, `GetCostReport`, `CreateCostReport`, `UpdateCostReport`, `DeleteCostReport`
 
 ### Annotations
 - `ListAnnotations`, `ListAllAnnotations`
@@ -264,6 +270,12 @@ Error helper functions:
   the console)
 - `ListSavingsViews`, `ListAllSavingsViews`
 - `GetSavingsView`, `CreateSavingsView`, `UpdateSavingsView`, `DeleteSavingsView`
+
+### Cost Estimates
+- `SubmitCostEstimate` posts a planned change's estimate for a pull request or a named plan, and
+  `ApplyCostEstimate` records the ids the apply gave its resources; both answer a
+  `CostEstimateReceipt` with the server's planned totals, and need only `submitCostEstimates`.
+- `ListSavingsItemsOptions.CostEstimateID` lists the savings findings on an estimate's resources.
 
 ### Commitments
 - `ListCommitments`, `ListAllCommitments`

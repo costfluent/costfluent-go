@@ -145,12 +145,17 @@ func HasCode(err error, code string) bool {
 	return false
 }
 
-// IsNotFound returns true if err is the API's 404 problem details: the object does not exist or is
-// not visible to the token. A 404 in another media type came from the proxy in front of the API,
-// not from the API, and is retryable instead.
+// codeNotFound is the API's code for an object that does not exist or is not visible to the token.
+const codeNotFound = "not_found"
+
+// IsNotFound returns true if err is the API's 404 problem details with the code not_found: the object
+// does not exist or is not visible to the token. A 404 the API answers with another code is its own
+// answer but says nothing about the object, and a 404 in another media type came from the proxy in
+// front of the API, not from the API, and is retryable instead.
 func IsNotFound(err error) bool {
 	var apiErr *APIError
-	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound && isProblem(apiErr.ContentType)
+	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound && isProblem(apiErr.ContentType) &&
+		apiErr.Code == codeNotFound
 }
 
 // IsConflict returns true if err is a 409 Conflict error

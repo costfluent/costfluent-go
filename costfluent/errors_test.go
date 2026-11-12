@@ -123,7 +123,7 @@ func TestErrorCodeAndRetryableDecode(t *testing.T) {
 }
 
 func TestProblemDetailPreferred(t *testing.T) {
-	c, _ := testClient(t, stub{404, `{"status":404,"title":"Not Found","detail":"Workspace not found"}`})
+	c, _ := testClient(t, stub{404, `{"status":404,"title":"Not Found","code":"not_found","detail":"Workspace not found"}`})
 
 	_, err := c.GetWorkspace(context.Background(), "ws_1")
 	if !IsNotFound(err) {
@@ -162,6 +162,7 @@ func TestEveryErrorStatusMapsToItsHelper(t *testing.T) {
 		{401, "unauthorized", false, helpers{unauthorized: true}, 1},
 		{403, "forbidden", false, helpers{forbidden: true}, 1},
 		{404, "not_found", false, helpers{notFound: true}, 1},
+		{404, "operation_not_found", false, helpers{}, 1},
 		{409, "conflict", false, helpers{conflict: true}, 1},
 		{422, "unprocessable", false, helpers{}, 1},
 		{429, "rate_limit_exceeded", true, helpers{rateLimited: true}, 4},
@@ -169,7 +170,7 @@ func TestEveryErrorStatusMapsToItsHelper(t *testing.T) {
 		{503, "service_unavailable", true, helpers{server: true}, 4},
 	}
 	for _, tc := range cases {
-		t.Run(http.StatusText(tc.status), func(t *testing.T) {
+		t.Run(http.StatusText(tc.status)+" "+tc.code, func(t *testing.T) {
 			var calls atomic.Int32
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls.Add(1)
@@ -395,11 +396,11 @@ func TestOnlyAProblemDetails404IsNotFound(t *testing.T) {
 		body        string
 		notFound    bool
 	}{
-		{"application/problem+json", `{"status":404,"title":"Not Found"}`, true},
-		{"Application/Problem+JSON; charset=utf-8", `{"status":404,"title":"Not Found"}`, true},
+		{"application/problem+json", `{"status":404,"title":"Not Found","code":"not_found"}`, true},
+		{"Application/Problem+JSON; charset=utf-8", `{"status":404,"title":"Not Found","code":"not_found"}`, true},
 		{"text/plain; charset=utf-8", "404 page not found\n", false},
 		{"text/html", "<html><body>Not Found</body></html>", false},
-		{"application/json", `{"status":404,"title":"Not Found"}`, false},
+		{"application/json", `{"status":404,"title":"Not Found","code":"not_found"}`, false},
 		{"", "", false},
 	}
 	for _, tc := range cases {
@@ -437,6 +438,44 @@ func TestOnlyAProblemDetails404IsNotFound(t *testing.T) {
 			if calls.Load() != 4 || len(slept.all()) != 3 || !IsRetryable(err) {
 				t.Errorf("sent %d times after waits %v, retryable %v: want the edge's 404 retried like a 5xx",
 					calls.Load(), slept.all(), IsRetryable(err))
+			}
+		})
+	}
+}
+
+// A 404 says an object is missing only with the API's code for it, not_found. Any other 404 the API
+// answers, such as one for a path it does not serve, leaves the object as it was: a caller that took
+// it as gone would drop from its state, or count as deleted, an object that still exists.
+func TestIsNotFoundReadsTheCode(t *testing.T) {
+	cases := []struct {
+		name        string
+		contentType string
+		body        string
+		notFound    bool
+	}{
+		{"not_found", "application/problem+json", `{"status":404,"title":"Not Found","code":"not_found"}`, true},
+		{"another code", "application/problem+json", `{"status":404,"title":"Not Found","code":"operation_not_found"}`, false},
+		{"no code", "application/problem+json", `{"status":404,"title":"Not Found"}`, false},
+		{"a body that does not parse", "application/problem+json", `{"status":404,"code":"not_fo`, false},
+		{"plain text", "text/plain; charset=utf-8", "404 page not found\n", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", tc.contentType)
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			t.Cleanup(srv.Close)
+			c := NewClient(WithBaseURL(srv.URL), WithAPIKey("key"))
+			recordSleeps(c)
+
+			_, err := c.GetWorkspace(context.Background(), "ws_1")
+			if StatusCode(err) != http.StatusNotFound {
+				t.Fatalf("err = %v, want a 404", err)
+			}
+			if IsNotFound(err) != tc.notFound {
+				t.Errorf("IsNotFound = %v, want %v", IsNotFound(err), tc.notFound)
 			}
 		})
 	}

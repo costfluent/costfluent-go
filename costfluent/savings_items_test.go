@@ -19,7 +19,7 @@ func TestListSavingsItems(t *testing.T) {
 
 	list, err := c.ListSavingsItems(context.Background(), "ws_1", &ListSavingsItemsOptions{
 		Tab: "inProgress", Source: "awsCostOptimizationHub", Kind: "rightsizing", CloudAccountID: "prv_1",
-		MinimumMonthlySaving: "25", Sort: "largestSaving", PageOptions: PageOptions{Page: 2, Limit: 10},
+		CostEstimateID: "est_aaaaaaaaaaaaaaaaaaaaaa", MinimumMonthlySaving: "25", Sort: "largestSaving", PageOptions: PageOptions{Page: 2, Limit: 10},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -31,6 +31,7 @@ func TestListSavingsItems(t *testing.T) {
 	wantQuery(t, g, "source", "awsCostOptimizationHub")
 	wantQuery(t, g, "kind", "rightsizing")
 	wantQuery(t, g, "cloudAccountId", "prv_1")
+	wantQuery(t, g, "costEstimateId", "est_aaaaaaaaaaaaaaaaaaaaaa")
 	wantQuery(t, g, "minimumMonthlySaving", "25")
 	wantQuery(t, g, "sort", "largestSaving")
 	wantQuery(t, g, "page", "2")
@@ -99,5 +100,78 @@ func TestListSavingsItemsRefusedValueIsAnError(t *testing.T) {
 
 	if _, err := c.ListSavingsItems(context.Background(), "ws_1", &ListSavingsItemsOptions{Tab: "open"}); !IsBadRequest(err) {
 		t.Fatalf("got %v, want a validation error", err)
+	}
+}
+
+// Accept and implement send no body; each answers 204, so the call returns no finding.
+func TestAcceptAndImplementSavingsItemSendNoBody(t *testing.T) {
+	c, got := testClient(t, stub{204, ""}, stub{204, ""})
+
+	if err := c.AcceptSavingsItem(context.Background(), "ws_1", "sav_1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.ImplementSavingsItem(context.Background(), "ws_1", "sav_1"); err != nil {
+		t.Fatal(err)
+	}
+	for i, path := range []string{"/v1/savings-items/sav_1/accept", "/v1/savings-items/sav_1/implement"} {
+		g := (*got)[i]
+		wantRequest(t, g, "POST", path)
+		wantQuery(t, g, "workspaceId", "ws_1")
+		if g.Body != nil {
+			t.Errorf("%s sent body %v", path, g.Body)
+		}
+	}
+}
+
+func TestRejectSavingsItemSendsTheReason(t *testing.T) {
+	c, got := testClient(t, stub{204, ""})
+
+	if err := c.RejectSavingsItem(context.Background(), "", "sav_1", "Reserved capacity covers it"); err != nil {
+		t.Fatal(err)
+	}
+	g := (*got)[0]
+	wantRequest(t, g, "POST", "/v1/savings-items/sav_1/reject")
+	wantQuery(t, g, "workspaceId", "ws_default")
+	wantBody(t, g, "reason", "Reserved capacity covers it")
+	if len(g.Body) != 1 {
+		t.Errorf("body %v, want the reason alone", g.Body)
+	}
+}
+
+func TestAssignSavingsItemOwnerReturnsTheFindingAsStored(t *testing.T) {
+	c, got := testClient(t, stub{200, savingsItemJSON})
+
+	item, err := c.AssignSavingsItemOwner(context.Background(), "ws_1", "sav_1", "Platform")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(*got) != 1 {
+		t.Fatalf("sent %d requests, want the PUT alone", len(*got))
+	}
+	g := (*got)[0]
+	wantRequest(t, g, "PUT", "/v1/savings-items/sav_1/owner")
+	wantQuery(t, g, "workspaceId", "ws_1")
+	wantBody(t, g, "owner", "Platform")
+	if item.ID != "sav_1" || item.Owner != "Platform" || item.Status != "implemented" {
+		t.Fatalf("decoded %+v", item)
+	}
+}
+
+// A finding already closed is the API's 409, returned as a conflict for each of the four writes.
+func TestSavingsItemWritesOnAClosedFindingAreAConflict(t *testing.T) {
+	conflict := stub{409, `{"status":409,"title":"Conflict","detail":"The finding is rejected.","code":"conflict"}`}
+	c, _ := testClient(t, conflict, conflict, conflict, conflict)
+	ctx := context.Background()
+
+	_, ownerErr := c.AssignSavingsItemOwner(ctx, "ws_1", "sav_1", "Platform")
+	for name, err := range map[string]error{
+		"accept":    c.AcceptSavingsItem(ctx, "ws_1", "sav_1"),
+		"implement": c.ImplementSavingsItem(ctx, "ws_1", "sav_1"),
+		"reject":    c.RejectSavingsItem(ctx, "ws_1", "sav_1", "No longer relevant"),
+		"owner":     ownerErr,
+	} {
+		if !IsConflict(err) {
+			t.Errorf("%s: got %v, want a conflict", name, err)
+		}
 	}
 }

@@ -182,6 +182,93 @@ func TestCostSummaryFiguresTheAPISendsAsNullStayNull(t *testing.T) {
 	}
 }
 
+// With conversion off over several currencies the summary has no currency of its own, so each
+// connection entry names its billing currency and a connection billed in two has an entry for each;
+// otherwise an entry's currency stays null, decoded and written again.
+func TestCostSummaryConnectionsCarryTheirCurrencyWhenMixed(t *testing.T) {
+	c, _ := testClient(t,
+		stub{200, `{"totalCost":null,"currency":null,"byProvider":[
+			{"providerId":"prv_1","providerName":"AWS","providerKey":"aws","currency":"EUR","cost":"300.00000000"},
+			{"providerId":"prv_1","providerName":"AWS","providerKey":"aws","currency":"USD","cost":"150.00000000"}]}`},
+		stub{200, `{"totalCost":"100.00000000","currency":"EUR","byProvider":[
+			{"providerId":"prv_1","providerName":"AWS","providerKey":"aws","currency":null,"cost":"100.00000000"}]}`},
+	)
+	window := CostFilterOptions{StartDate: "2026-09-01", EndDate: "2026-09-30"}
+
+	mixed, err := c.GetCostSummary(context.Background(), &window)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mixed.ByProvider) != 2 {
+		t.Fatalf("decoded %d entries, want 2", len(mixed.ByProvider))
+	}
+	for i, want := range []struct{ currency, cost string }{{"EUR", "300"}, {"USD", "150"}} {
+		entry := mixed.ByProvider[i]
+		if entry.ProviderID != "prv_1" || entry.Currency == nil || *entry.Currency != want.currency || !entry.Cost.Equal(Decimal(want.cost)) {
+			t.Errorf("entry %d decoded %+v, want prv_1 %s %s", i, entry, want.currency, want.cost)
+		}
+	}
+
+	plain, err := c.GetCostSummary(context.Background(), &window)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain.ByProvider[0].Currency != nil {
+		t.Errorf("entry currency %q, want nil", *plain.ByProvider[0].Currency)
+	}
+	out, err := json.Marshal(plain.ByProvider[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `"currency":null`) {
+		t.Errorf("written as %s, want \"currency\":null", out)
+	}
+}
+
+// A page of cost data over several currencies with conversion off has no total and no currency of
+// its own; the totals are in presentation.totalsByCurrency. Decoded and written again, as the MCP
+// server does, the two must be left out rather than written as an empty amount and currency, and a
+// page in one currency keeps both.
+func TestCostDataMetaFiguresTheAPISendsAsNullAreLeftOut(t *testing.T) {
+	const totals = `"totalsByCurrency":[{"currency":"EUR","amount":"10.00000000"},{"currency":"USD","amount":"15.00000000"}]`
+	for _, tc := range []struct {
+		name, figures string
+		// want maps each of the meta's own keys to the JSON it is written as, "" for left out.
+		want map[string]string
+	}{
+		{"mixed currencies", `"totalCost":null,"currency":null`, map[string]string{"totalCost": "", "currency": ""}},
+		{"one currency", `"totalCost":"25.00000000","currency":"USD"`,
+			map[string]string{"totalCost": `"25.00000000"`, "currency": `"USD"`}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := testClient(t, stub{200, `{"links":{"self":"s"},"data":[],"meta":{"startDate":"2026-09-01","endDate":"2026-09-30",
+				"granularity":"day","totalRecords":0,` + tc.figures + `,"presentation":{` + totals + `},"dataVersion":"v1"}}`})
+			resp, err := c.QueryCostData(context.Background(), &CostDataQuery{
+				CostFilterOptions: CostFilterOptions{StartDate: "2026-09-01", EndDate: "2026-09-30"},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			out, err := json.Marshal(resp.Meta)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(out), totals) {
+				t.Errorf("written as %s, want %s", out, totals)
+			}
+			var meta map[string]json.RawMessage
+			if err := json.Unmarshal(out, &meta); err != nil {
+				t.Fatal(err)
+			}
+			for key, want := range tc.want {
+				if got := string(meta[key]); got != want {
+					t.Errorf("%s written as %q, want %q: %s", key, got, want, out)
+				}
+			}
+		})
+	}
+}
+
 // A read states how its amortized figures placed commitment discounts, on a page of cost data and
 // on a summary alike.
 func TestCostReadsStateHowCommitmentDiscountsArePlaced(t *testing.T) {

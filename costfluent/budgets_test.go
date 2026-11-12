@@ -386,8 +386,9 @@ func TestUpdateBudgetSendsTheETagItReadAndReportsAStaleOne(t *testing.T) {
 }
 
 // The API sends a budget's figures as null when its spend is unknown, unavailable or outside the
-// plan, or before it starts. Decoded and written again, as the MCP server does, they must stay
-// absent rather than read as a measured 0 or an empty amount, and a measured zero must stay 0.
+// plan, or before it starts, and its amount as null when its periods carry different ones. Decoded
+// and written again, as the MCP server does, they must stay absent rather than read as a measured 0
+// or an empty amount, and a measured zero must stay 0.
 func TestBudgetFiguresTheAPISendsAsNullStayUnset(t *testing.T) {
 	for _, tc := range []struct {
 		name, body       string
@@ -403,6 +404,10 @@ func TestBudgetFiguresTheAPISendsAsNullStayUnset(t *testing.T) {
 			[]string{`"percentUsed":0`, `"currentSpend":"0.00000000"`, `"budgetedToDate":"0.00000000"`, `"projectedSpend":"0.00000000"`}, nil},
 		{"measured", `"spendAvailability":"computed","state":"atRisk","currentSpend":"250.50000000","budgetedToDate":"193.55000000","projectedSpend":"647.13000000","percentUsed":25.05`,
 			[]string{`"percentUsed":25.05`, `"currentSpend":"250.50000000"`}, nil},
+		{"periods with different amounts", `"amount":null,"spendAvailability":"computed","state":"onTrack","currentSpend":"10.00000000","percentUsed":5`,
+			[]string{`"currentSpend":"10.00000000"`}, []string{`"amount"`}},
+		{"periods with one amount", `"amount":"200.00000000","spendAvailability":"computed","state":"onTrack","currentSpend":"10.00000000","percentUsed":5`,
+			[]string{`"amount":"200.00000000"`}, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c, _ := testClient(t, stub{200, `{"id":"bdg_1","name":"Cloud","currency":"EUR","startDate":"2026-10-01",` + tc.body + `}`})

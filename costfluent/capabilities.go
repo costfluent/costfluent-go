@@ -60,6 +60,7 @@ const (
 	CapabilityViewAuditLog                  Capability = "viewAuditLog"
 	CapabilityViewSavingsItems              Capability = "viewSavingsItems"
 	CapabilityManageSavingsItems            Capability = "manageSavingsItems"
+	CapabilityRespondToSavingsItem          Capability = "respondToSavingsItem"
 	CapabilityViewCostAllocation            Capability = "viewCostAllocation"
 	CapabilityManageCostAllocation          Capability = "manageCostAllocation"
 	CapabilityManageBusinessMetrics         Capability = "manageBusinessMetrics"
@@ -121,6 +122,7 @@ func Capabilities() []Capability {
 		CapabilityViewAuditLog,
 		CapabilityViewSavingsItems,
 		CapabilityManageSavingsItems,
+		CapabilityRespondToSavingsItem,
 		CapabilityViewCostAllocation,
 		CapabilityManageCostAllocation,
 		CapabilityManageBusinessMetrics,

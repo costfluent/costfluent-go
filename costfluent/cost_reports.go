@@ -36,6 +36,9 @@ type CostReport struct {
 	Settings  CostReportSettings `json:"settings"`
 	CreatedAt *time.Time         `json:"createdAt,omitempty"`
 	UpdatedAt *time.Time         `json:"updatedAt,omitempty"`
+	// IsDefault marks the workspace's default report: the unfiltered report every workspace is
+	// created with, listed first, which cannot be deleted. The Public API only reads it.
+	IsDefault bool `json:"isDefault"`
 	// ETag is the stored version this response carried, to send back with IfMatch. Empty from a
 	// list, which carries no versions.
 	ETag string `json:"-"`
@@ -83,7 +86,10 @@ func (g Grouping) String() string {
 // sent, so settings without it chart the measure alone and return the calculation and scale to their
 // defaults. UnitCostLabelFilter chooses which of the metric's values count, and is taken as sent the
 // same way: empty counts every value. ComparisonStartDate and ComparisonEndDate are the window the
-// report is compared against, when one is set.
+// report is compared against, when one is set. ComparisonMode (one of the ComparisonMode constants)
+// is what the report compares with otherwise: the window before its own, or the same days a year
+// earlier; the fixed window wins over it on the report's own range, and the mode still decides the
+// comparison under a dashboard's range.
 type CostReportSettings struct {
 	Amortize            bool                     `json:"amortize"`
 	IncludeCredits      bool                     `json:"includeCredits"`
@@ -98,7 +104,18 @@ type CostReportSettings struct {
 	UnitCostScale       int                      `json:"unitCostScale,omitempty"`
 	ComparisonStartDate *string                  `json:"comparisonStartDate,omitempty"`
 	ComparisonEndDate   *string                  `json:"comparisonEndDate,omitempty"`
+	ComparisonMode      string                   `json:"comparisonMode,omitempty"`
 }
+
+// The comparison modes a cost report compares with when it has no fixed comparison window.
+// ComparisonModePreviousPeriod is the window before the report's own, of the same length;
+// ComparisonModeSamePeriodLastYear is the same days a year earlier, by bin: a day one calendar year
+// back (Feb 29 to Feb 28), a week 52 weeks back so weekdays pair, a month or quarter 12 months back.
+// More values may be added.
+const (
+	ComparisonModePreviousPeriod     = "previousPeriod"
+	ComparisonModeSamePeriodLastYear = "samePeriodLastYear"
+)
 
 // UnitCostLabelCondition is one label column of the unit cost metric and the values of it the unit
 // cost counts. A metric value counts when its label in every condition's column is one of that
@@ -116,7 +133,8 @@ type UnitCostLabelCondition struct {
 // update naming a metric keeps the report's own. ComparisonStartDate and ComparisonEndDate, both
 // YYYY-MM-DD, are the window the report is compared against and are taken as sent like the unit
 // cost metric: an update whose settings leave them out clears the window, so send back the window
-// the report holds.
+// the report holds. ComparisonMode reads as on CostReportSettings, and an empty one is left out like
+// a flag: a new report compares with the previous period and an update keeps the report's own.
 type CostReportSettingsInput struct {
 	Amortize            *bool                    `json:"amortize,omitempty"`
 	IncludeCredits      *bool                    `json:"includeCredits,omitempty"`
@@ -131,6 +149,7 @@ type CostReportSettingsInput struct {
 	UnitCostScale       *int                     `json:"unitCostScale,omitempty"`
 	ComparisonStartDate *string                  `json:"comparisonStartDate,omitempty"`
 	ComparisonEndDate   *string                  `json:"comparisonEndDate,omitempty"`
+	ComparisonMode      string                   `json:"comparisonMode,omitempty"`
 }
 
 // CreateCostReportInput creates a saved cost report.
@@ -181,9 +200,39 @@ type UpdateCostReportInput struct {
 	Settings       *CostReportSettingsInput `json:"settings,omitempty"`
 }
 
-// ListCostReports returns a workspace's saved cost reports.
-func (c *Client) ListCostReports(ctx context.Context, workspaceID string) ([]CostReport, error) {
-	return listWorkspace[CostReport](c, ctx, "/v1/cost-reports", workspaceID)
+// ListCostReportsOptions narrows a cost report listing. An empty FolderID sends no filter.
+type ListCostReportsOptions struct {
+	// FolderID narrows the listing to one folder's reports, on every page read.
+	FolderID string
+}
+
+// ListCostReports returns a workspace's saved cost reports, across all pages; nil opts lists every
+// folder's.
+func (c *Client) ListCostReports(ctx context.Context, workspaceID string, opts *ListCostReportsOptions) ([]CostReport, error) {
+	return listAll(maxPageSize, func(p *PageOptions) (*ListResponse[CostReport], error) {
+		return c.ListCostReportsPage(ctx, workspaceID, opts, p)
+	})
+}
+
+// ListCostReportsPage returns one page of a workspace's saved cost reports, with the links naming
+// the next; nil opts lists every folder's, and nil page the API's first page at its default size.
+func (c *Client) ListCostReportsPage(ctx context.Context, workspaceID string, opts *ListCostReportsOptions, page *PageOptions) (*ListResponse[CostReport], error) {
+	req, err := c.newWorkspaceRequest(ctx, http.MethodGet, "/v1/cost-reports", workspaceID, nil)
+	if err != nil {
+		return nil, err
+	}
+	if opts != nil {
+		q := req.URL.Query()
+		setIf(q, "folderId", opts.FolderID)
+		req.URL.RawQuery = q.Encode()
+	}
+	page.apply(req)
+
+	var resp ListResponse[CostReport]
+	if err := c.do(req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 // GetCostReport returns a single saved cost report by ID.
@@ -211,7 +260,12 @@ type CostReportData struct {
 	Comparison   *CostReportComparison `json:"comparison,omitempty"`
 	HistoryFloor *string               `json:"historyFloor,omitempty"`
 
-	// DataThrough is the last day the numbers are complete for, when the API knows it.
+	// ComparisonHistoryFloor is the first day the plan's history holds when that floor cut the
+	// window the report compares with; Comparison is then nil, never a comparison with zero.
+	ComparisonHistoryFloor *string `json:"comparisonHistoryFloor,omitempty"`
+
+	// DataThrough is the latest day every connection the read covers has committed data for, the
+	// earliest of theirs, when the API knows it. A later day may still change.
 	DataThrough *string `json:"dataThrough,omitempty"`
 
 	// UnitCost is the report's business metric in its unit cost calculation, when it names one.
@@ -219,6 +273,19 @@ type CostReportData struct {
 
 	// Forecast is the report's forecast over the days still arriving or to come, when it shows one.
 	Forecast *CostReportForecast `json:"forecast,omitempty"`
+
+	// ResourceNames names each resource id the series and breakdown key, for a report grouped by
+	// resourceId; nil for any other grouping. An id whose cost rows name nothing is left out.
+	ResourceNames map[string]string `json:"resourceNames,omitempty"`
+
+	// AccountNames names each subAccount and billingAccount id the series and breakdown key: the
+	// display name of the one workspace connection carrying a billing account, else the bill's
+	// latest name. Nil when no id has one.
+	AccountNames map[string]string `json:"accountNames,omitempty"`
+
+	// ClusterNames names each cluster id the series and breakdown key by its connection's display
+	// name, for a report grouped by cluster; nil when none has one.
+	ClusterNames map[string]string `json:"clusterNames,omitempty"`
 }
 
 // CostReportForecast is a report's forecast, period by period, from the first day whose cost is
@@ -329,14 +396,21 @@ type CostReportBreakdown struct {
 	// ChangePercent is ComparedCost, or Cost when compared whole, against PreviousCost; nil where
 	// PreviousCost is zero or not compared.
 	ChangePercent *float64 `json:"changePercent,omitempty"`
+	// UnitPrice is a usage report's price of one Unit: the cost of this group's rows over their
+	// quantity, in the summary's Currency, to 12 decimals (times 1,000,000 for a price per million
+	// tokens). Nil under every other measure, where the group's cost is in more than one currency
+	// or not all of it converts, and where it has no positive quantity.
+	UnitPrice *float64 `json:"unitPrice,omitempty"`
 }
 
-// CostReportComparison is the window before the report's own, day by day, when the report
-// compares to the last period.
+// CostReportComparison is the window the report's own is compared with, day by day, when the report
+// compares to the last period: its fixed comparison window, the window before its own, or, when
+// SamePeriodLastYear says so, the same days a year earlier.
 type CostReportComparison struct {
-	StartDate string                      `json:"startDate,omitempty"`
-	EndDate   string                      `json:"endDate,omitempty"`
-	Series    []CostReportComparisonPoint `json:"series"`
+	StartDate          string                      `json:"startDate,omitempty"`
+	EndDate            string                      `json:"endDate,omitempty"`
+	Series             []CostReportComparisonPoint `json:"series"`
+	SamePeriodLastYear bool                        `json:"samePeriodLastYear"`
 }
 
 // CostReportComparisonPoint pairs a day of the window with the day it is compared to.

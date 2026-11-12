@@ -13,8 +13,9 @@ import (
 type Budget struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
-	// Amount is the amount every stored period carries, and unset when they differ.
-	Amount Decimal `json:"amount"`
+	// Amount is the amount every stored period carries, unset when they differ and then left out
+	// when written rather than as an empty amount; Periods then holds each period's amount.
+	Amount Decimal `json:"amount,omitempty"`
 	// Currency is the budget's currency, which a usage budget keeps although nothing it counts is
 	// in it.
 	Currency string `json:"currency"`

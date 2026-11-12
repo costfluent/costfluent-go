@@ -63,6 +63,9 @@ type ListSavingsItemsOptions struct {
 	Kind   string
 	// CloudAccountID is the connection whose provider generated the findings
 	CloudAccountID string
+	// CostEstimateID lists only the findings whose resource equals, ignoring case, an id on one of
+	// that estimate's resources; another workspace's or an unknown estimate matches none
+	CostEstimateID string
 	// MinimumMonthlySaving is the smallest estimated monthly saving listed, in each finding's own currency
 	MinimumMonthlySaving string
 	// Sort is newest (the default) or largestSaving
@@ -83,6 +86,7 @@ func (c *Client) ListSavingsItems(ctx context.Context, workspaceID string, opts 
 		setIf(q, "source", opts.Source)
 		setIf(q, "kind", opts.Kind)
 		setIf(q, "cloudAccountId", opts.CloudAccountID)
+		setIf(q, "costEstimateId", opts.CostEstimateID)
 		setIf(q, "minimumMonthlySaving", opts.MinimumMonthlySaving)
 		setIf(q, "sort", opts.Sort)
 		req.URL.RawQuery = q.Encode()
@@ -114,6 +118,55 @@ func (c *Client) GetSavingsItem(ctx context.Context, workspaceID, id string) (*S
 	if err != nil {
 		return nil, err
 	}
+
+	var item SavingsItem
+	if err := c.do(req, &item); err != nil {
+		return nil, err
+	}
+	return &item, nil
+}
+
+// AcceptSavingsItem records that the workspace will act on an open finding, which moves it to
+// accepted. It changes nothing in the cloud; a closed finding is the API's 409.
+func (c *Client) AcceptSavingsItem(ctx context.Context, workspaceID, id string, opts ...RequestOption) error {
+	return c.savingsItemAction(ctx, workspaceID, id, "/accept", nil, opts...)
+}
+
+// ImplementSavingsItem records that the change an accepted finding recommends was made, which moves
+// it to implemented. It changes nothing in the cloud; a closed finding is the API's 409.
+func (c *Client) ImplementSavingsItem(ctx context.Context, workspaceID, id string, opts ...RequestOption) error {
+	return c.savingsItemAction(ctx, workspaceID, id, "/implement", nil, opts...)
+}
+
+// RejectSavingsItem declines an open or accepted finding with the reason given, at most 1,000
+// characters, which moves it to rejected. A closed finding is the API's 409.
+func (c *Client) RejectSavingsItem(ctx context.Context, workspaceID, id, reason string, opts ...RequestOption) error {
+	body := struct {
+		Reason string `json:"reason"`
+	}{Reason: reason}
+	return c.savingsItemAction(ctx, workspaceID, id, "/reject", &body, opts...)
+}
+
+func (c *Client) savingsItemAction(ctx context.Context, workspaceID, id, suffix string, body any, opts ...RequestOption) error {
+	req, err := c.newWorkspaceRequest(ctx, http.MethodPost, "/v1/savings-items/"+url.PathEscape(id)+suffix, workspaceID, body)
+	if err != nil {
+		return err
+	}
+	applyOptions(req, opts)
+	return c.do(req, nil)
+}
+
+// AssignSavingsItemOwner sets who acts on a finding, free text of at most 200 characters, and
+// returns the finding as stored. A closed finding is the API's 409.
+func (c *Client) AssignSavingsItemOwner(ctx context.Context, workspaceID, id, owner string, opts ...RequestOption) (*SavingsItem, error) {
+	body := struct {
+		Owner string `json:"owner"`
+	}{Owner: owner}
+	req, err := c.newWorkspaceRequest(ctx, http.MethodPut, "/v1/savings-items/"+url.PathEscape(id)+"/owner", workspaceID, &body)
+	if err != nil {
+		return nil, err
+	}
+	applyOptions(req, opts)
 
 	var item SavingsItem
 	if err := c.do(req, &item); err != nil {
