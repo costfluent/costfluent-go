@@ -75,11 +75,13 @@ func WithDebug(debug bool) Option {
 	}
 }
 
-// WithMaxRetryAfter sets the longest wait the API asks for in Retry-After or RateLimit-Reset that the
-// client waits out before trying again; a request asked to wait longer fails at once with the API's
-// answer, whose RetryAfter says how long. By default the client waits out up to 60 seconds. Zero or
-// less waits out none, for a caller answering someone who can be told when to come back instead.
-// It changes no retry of a server or connection error.
+// WithMaxRetryAfter sets the longest the client waits out rate limits in all on one call, each wait
+// counted as at least a second: a 429 is resent for as long as the waits it asks for, in Retry-After
+// or RateLimit-Reset, stay within it, and once the next would pass it the call fails at once with the
+// API's answer, whose RetryAfter says how long. A server error asking for a single wait longer than it
+// fails at once too. By default the client waits out up to 60 seconds. Zero or less waits out no rate
+// limit, for a caller answering someone who can be told when to come back instead. Server and
+// connection errors without a wait keep their three retries.
 func WithMaxRetryAfter(d time.Duration) Option {
 	return func(c *Client) {
 		c.maxRetryAfter = &d

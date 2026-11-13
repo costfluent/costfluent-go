@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"math/rand"
 	"net/http"
 	"strconv"
@@ -106,28 +107,30 @@ func (c *Client) do(req *http.Request, v any) error {
 }
 
 // retryTransport resends a request the API turned away for now: any method on a 429, because the
-// API's rate limiter answers before a request reaches an endpoint, and the unconditional idempotent
-// requests, creates under an Idempotency-Key among them, on a 5xx, a 404 from the proxy rather than
-// the API, or a transport error. Each attempt runs under its own timeout.
+// API's rate limiter answers before a request reaches an endpoint, for as long as the waits stay
+// within maxRetryAfter in all; and the unconditional idempotent requests, creates under an
+// Idempotency-Key among them, on a 5xx, a 404 from the proxy rather than the API, or a transport
+// error, up to maxRetries times. Each attempt runs under its own timeout.
 type retryTransport struct {
 	base       http.RoundTripper
 	maxRetries int
 	baseDelay  time.Duration
 	maxDelay   time.Duration
-	// maxRetryAfter is the longest wait the API asks for that is waited out: zero is
-	// defaultMaxRetryAfter, and waitOutNone none at all.
+	// maxRetryAfter is the longest a call waits out rate limits in all, and the longest wait a
+	// server error asks for that is waited out: zero is defaultMaxRetryAfter, and waitOutNone none.
 	maxRetryAfter  time.Duration
 	attemptTimeout time.Duration
 	now            func() time.Time
 	sleep          func(context.Context, time.Duration) error
 }
 
-// defaultMaxRetryAfter is the longest Retry-After the transport waits out. A longer one means the
-// token's hourly quota is spent, and the 429 is returned rather than held for most of an hour.
+// defaultMaxRetryAfter is the longest a call waits out rate limits in all: one per-minute window, the
+// longest a per-minute refusal takes to clear. A single longer Retry-After means the token's hourly
+// quota is spent, and the 429 is returned at once rather than held for most of an hour.
 const defaultMaxRetryAfter = 60 * time.Second
 
-// waitOutNone is the maxRetryAfter that returns every wait the API asks for at once: a Retry-After
-// of 0 is still above it.
+// waitOutNone is the maxRetryAfter that returns every rate limit and every wait the API asks for at
+// once: a Retry-After of 0 is still above it.
 const waitOutNone = -time.Nanosecond
 
 func sleepContext(ctx context.Context, d time.Duration) error {
@@ -173,23 +176,47 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 	}
 
-	for attempt := 0; ; attempt++ {
+	// A 429 is resent while the waits it asks for stay within maxRetryAfter in all, whatever their
+	// count: under contention the API's limiter frees one slot at a time and answers each refusal with
+	// about a second, so a count would give up while the budget refills. Each wait counts at least a
+	// second, which ends a 429 that asks for none, as an intermediary's Retry-After: 0 does, after 61
+	// attempts. Server and connection errors keep their count of maxRetries.
+	var retries int
+	// backoffs counts the waits the API did not ask for: the backoff's exponent, so a server error
+	// after rate limits backs off from its first step.
+	var backoffs int
+	var rateLimited time.Duration
+	for {
 		resp, err := t.attempt(req, bodyBytes)
-		last := attempt >= maxRetries
+		limited := err == nil && resp.StatusCode == http.StatusTooManyRequests
 		if err != nil {
 			var timedOut *attemptTimeoutError
-			if last || !retryable(req) || errors.As(err, &timedOut) {
+			if retries >= maxRetries || !retryable(req) || errors.As(err, &timedOut) {
 				return nil, err
 			}
-		} else if last || !shouldRetry(req, resp) {
+		} else if !shouldRetry(req, resp) || (!limited && retries >= maxRetries) {
 			return resp, nil
 		}
 
-		delay := t.calculateDelay(attempt, baseDelay, maxDelay, resp)
-		if resp != nil {
-			if _, asked := retryAfter(resp.Header, t.clock()); asked && delay > maxRetryAfter {
+		delay, asked := t.calculateDelay(backoffs, baseDelay, maxDelay, resp)
+		if !asked {
+			backoffs++
+		}
+		if limited {
+			counted := max(delay, time.Second)
+			// Subtracted, not added: rateLimited never exceeds maxRetryAfter, but a sum with a huge
+			// Retry-After wraps negative and would pass.
+			if counted > maxRetryAfter-rateLimited {
 				return resp, nil
 			}
+			rateLimited += counted
+		} else {
+			retries++
+			if asked && delay > maxRetryAfter {
+				return resp, nil
+			}
+		}
+		if resp != nil {
 			_ = resp.Body.Close()
 		}
 		if err := sleep(req.Context(), delay); err != nil {
@@ -280,15 +307,20 @@ func shouldRetry(req *http.Request, resp *http.Response) bool {
 		((resp.StatusCode >= 500 || edgeNotFound(resp)) && retryable(req))
 }
 
-func (t *retryTransport) calculateDelay(attempt int, baseDelay, maxDelay time.Duration, resp *http.Response) time.Duration {
+// calculateDelay returns the wait before the next attempt and whether the API asked for it. A wait
+// the API did not ask for is the backoff's step-th, doubled from baseDelay up to maxDelay, with jitter.
+func (t *retryTransport) calculateDelay(step int, baseDelay, maxDelay time.Duration, resp *http.Response) (time.Duration, bool) {
 	if resp != nil {
 		if d, ok := retryAfter(resp.Header, t.clock()); ok {
-			return d
+			return d, true
 		}
 	}
 
-	// Exponential backoff with jitter
-	delay := baseDelay * (1 << attempt)
+	// Doubled step by step rather than shifted, which overflows time.Duration from about step 34.
+	delay := baseDelay
+	for i := 0; i < step && delay < maxDelay; i++ {
+		delay *= 2
+	}
 	if delay > maxDelay {
 		delay = maxDelay
 	}
@@ -299,7 +331,7 @@ func (t *retryTransport) calculateDelay(attempt int, baseDelay, maxDelay time.Du
 		delay += jitter
 	}
 
-	return delay
+	return delay, false
 }
 
 func (t *retryTransport) clock() time.Time {
@@ -319,8 +351,10 @@ func retryAfter(h http.Header, now time.Time) (time.Duration, bool) {
 	if ra == "" {
 		return 0, false
 	}
-	if secs, err := strconv.Atoi(ra); err == nil {
-		return max(time.Duration(secs)*time.Second, 0), true
+	if secs, err := strconv.ParseInt(ra, 10, 64); err == nil {
+		// Clamped before the multiplication, which wraps past about 292 years into any value, a
+		// short wait included.
+		return time.Duration(min(max(secs, 0), math.MaxInt64/int64(time.Second))) * time.Second, true
 	}
 	if at, err := http.ParseTime(ra); err == nil {
 		return max(at.Sub(now), 0), true

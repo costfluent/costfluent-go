@@ -3,10 +3,12 @@ package costfluent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -474,23 +476,40 @@ func TestRetryDelay(t *testing.T) {
 		}
 	}
 
-	if got := rt.calculateDelay(0, time.Second, 30*time.Second, withRetryAfter("7")); got != 7*time.Second {
-		t.Errorf("Retry-After 7 gave %s", got)
+	asked := func(t *testing.T, d time.Duration, ok bool, want time.Duration) {
+		t.Helper()
+		if !ok || d != want {
+			t.Errorf("delay %s asked %v, want the %s the API asked for", d, ok, want)
+		}
 	}
-	if got := rt.calculateDelay(3, time.Second, 30*time.Second, withRetryAfter("0")); got != 0 {
-		t.Errorf("Retry-After 0 gave %s", got)
+	backoff := func(t *testing.T, d time.Duration, ok bool, lo time.Duration) {
+		t.Helper()
+		if ok {
+			t.Errorf("delay %s counted as asked for, want a backoff", d)
+		}
+		within(t, d, lo)
 	}
-	if got := rt.calculateDelay(1, time.Second, 30*time.Second, withRetryAfter("Wed, 21 Oct 2026 07:28:09 GMT")); got != 9*time.Second {
-		t.Errorf("Retry-After as a date 9s ahead gave %s", got)
-	}
-	if got := rt.calculateDelay(1, time.Second, 30*time.Second, withRetryAfter("Wed, 21 Oct 2026 07:27:00 GMT")); got != 0 {
-		t.Errorf("Retry-After as a past date gave %s", got)
-	}
+
+	d, ok := rt.calculateDelay(0, time.Second, 30*time.Second, withRetryAfter("7"))
+	asked(t, d, ok, 7*time.Second)
+	d, ok = rt.calculateDelay(3, time.Second, 30*time.Second, withRetryAfter("0"))
+	asked(t, d, ok, 0)
+	d, ok = rt.calculateDelay(1, time.Second, 30*time.Second, withRetryAfter("Wed, 21 Oct 2026 07:28:09 GMT"))
+	asked(t, d, ok, 9*time.Second)
+	d, ok = rt.calculateDelay(1, time.Second, 30*time.Second, withRetryAfter("Wed, 21 Oct 2026 07:27:00 GMT"))
+	asked(t, d, ok, 0)
 	// A value that is neither seconds nor a date is ignored, so the backoff applies.
-	within(t, rt.calculateDelay(1, time.Second, 30*time.Second, withRetryAfter("soon")), 2*time.Second)
-	within(t, rt.calculateDelay(0, time.Second, 30*time.Second, nil), time.Second)
-	within(t, rt.calculateDelay(2, time.Second, 30*time.Second, nil), 4*time.Second)
-	within(t, rt.calculateDelay(10, time.Second, 30*time.Second, nil), 30*time.Second)
+	d, ok = rt.calculateDelay(1, time.Second, 30*time.Second, withRetryAfter("soon"))
+	backoff(t, d, ok, 2*time.Second)
+	d, ok = rt.calculateDelay(0, time.Second, 30*time.Second, nil)
+	backoff(t, d, ok, time.Second)
+	d, ok = rt.calculateDelay(2, time.Second, 30*time.Second, nil)
+	backoff(t, d, ok, 4*time.Second)
+	d, ok = rt.calculateDelay(10, time.Second, 30*time.Second, nil)
+	backoff(t, d, ok, 30*time.Second)
+	// A shift by this many steps overflows time.Duration, whose negative jitter bound would panic.
+	d, ok = rt.calculateDelay(100, time.Second, 30*time.Second, nil)
+	backoff(t, d, ok, 30*time.Second)
 }
 
 func TestUnreachableServerIsNotAnAPIError(t *testing.T) {
@@ -800,5 +819,288 @@ func TestEdgeNotFoundDoesNotResendATrigger(t *testing.T) {
 	}
 	if calls.Load() != 1 {
 		t.Fatalf("trigger sent %d times, want 1", calls.Load())
+	}
+}
+
+// answer is one scripted reply: its status and, when set, its Retry-After.
+type answer struct {
+	status     int
+	retryAfter string
+}
+
+func answers(n int, a answer) []answer {
+	s := make([]answer, n)
+	for i := range s {
+		s[i] = a
+	}
+	return s
+}
+
+// scriptedAPI answers the requests in order from its script, the last answer for every request
+// after it, and keeps each request's method.
+type scriptedAPI struct {
+	mu      sync.Mutex
+	methods []string
+}
+
+func (s *scriptedAPI) sent(method string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, m := range s.methods {
+		if method == "" || m == method {
+			n++
+		}
+	}
+	return n
+}
+
+func scriptedServer(t *testing.T, script []answer, opts ...Option) (*Client, *scriptedAPI) {
+	t.Helper()
+	api := &scriptedAPI{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		api.mu.Lock()
+		api.methods = append(api.methods, r.Method)
+		a := script[min(len(api.methods), len(script))-1]
+		api.mu.Unlock()
+		if a.retryAfter != "" {
+			w.Header().Set("Retry-After", a.retryAfter)
+		}
+		if a.status < 300 {
+			w.Header().Set("Content-Type", "application/json")
+			if r.Method == http.MethodPost {
+				w.WriteHeader(http.StatusCreated)
+			}
+			_, _ = io.WriteString(w, `{"id":"ws_1","name":"n","currency":"EUR"}`)
+			return
+		}
+		w.Header().Set("Content-Type", "application/problem+json")
+		w.WriteHeader(a.status)
+		_, _ = fmt.Fprintf(w, `{"status":%d,"title":%q,"retryable":true}`, a.status, http.StatusText(a.status))
+	}))
+	t.Cleanup(srv.Close)
+	return NewClient(append([]Option{WithBaseURL(srv.URL)}, opts...)...), api
+}
+
+type countedWaitKey struct{}
+
+// The Public API's limiter is a sliding log that answers a refusal with the time until its oldest
+// hit leaves the window, at least a second, and records only the hits it allows; under contention
+// it frees one slot at a time. Here one request per 100 ms stands for the token's budget, with the
+// Retry-After and every wait scaled 1:10, so ten readers racing for the one slot, as Terraform's ten
+// workers do, each get about one refusal per reader served before them.
+func TestRetryWaitsOutShortRateLimitsUnderContention(t *testing.T) {
+	const window = 100 * time.Millisecond
+	var mu sync.Mutex
+	var hits []time.Time
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		now := time.Now()
+		for len(hits) > 0 && now.Sub(hits[0]) >= window {
+			hits = hits[1:]
+		}
+		if len(hits) > 0 {
+			scaled := hits[0].Add(window).Sub(now) * 10
+			mu.Unlock()
+			w.Header().Set("Retry-After", strconv.Itoa(max(int((scaled+time.Second-1)/time.Second), 1)))
+			w.Header().Set("Content-Type", "application/problem+json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = io.WriteString(w, `{"status":429,"title":"Too many requests","detail":"API call quota exceeded: at most 1 per 100ms.","retryable":true}`)
+			return
+		}
+		hits = append(hits, now)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"ws_1","name":"n","currency":"EUR"}`)
+	}))
+	t.Cleanup(srv.Close)
+	c := NewClient(WithBaseURL(srv.URL))
+	c.httpClient.Transport.(*retryTransport).sleep = func(ctx context.Context, d time.Duration) error {
+		*ctx.Value(countedWaitKey{}).(*time.Duration) += d
+		return sleepContext(ctx, d/10)
+	}
+
+	const readers = 10
+	errs := make([]error, readers)
+	waits := make([]time.Duration, readers)
+	start := time.Now()
+	var wg sync.WaitGroup
+	for i := range readers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, errs[i] = c.GetWorkspace(context.WithValue(context.Background(), countedWaitKey{}, &waits[i]), "ws_1")
+		}()
+	}
+	wg.Wait()
+	elapsed := time.Since(start)
+
+	failed := 0
+	for i, err := range errs {
+		if err != nil {
+			failed++
+			t.Errorf("reader %d after %s of waits: %v", i, waits[i], err)
+		}
+	}
+	if failed > 0 {
+		t.Fatalf("%d of %d readers failed", failed, readers)
+	}
+	for i, w := range waits {
+		if w > 15*time.Second {
+			t.Errorf("reader %d waited %s, want about one second per reader served before it", i, w)
+		}
+	}
+	if elapsed > 5*time.Second {
+		t.Errorf("the readers took %s, want about one second", elapsed)
+	}
+}
+
+// A 429 is resent for as long as the waits it asks for stay within the bound, whatever their count.
+func TestRetryKeepsResendingAShortRateLimitWithinTheBound(t *testing.T) {
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		t.Run(method, func(t *testing.T) {
+			c, api := scriptedServer(t, append(answers(9, answer{http.StatusTooManyRequests, "1"}), answer{status: http.StatusOK}))
+			slept := recordSleeps(c)
+
+			var err error
+			if method == http.MethodGet {
+				_, err = c.GetWorkspace(context.Background(), "ws_1")
+			} else {
+				_, err = c.CreateWorkspace(context.Background(), &CreateWorkspaceInput{Name: "n", Currency: "EUR"})
+			}
+			if err != nil {
+				t.Fatalf("err = %v after %d requests, want the 200 after nine 1s waits", err, api.sent(method))
+			}
+			if got := api.sent(method); got != 10 {
+				t.Errorf("sent %d %s requests, want 10", got, method)
+			}
+			waits := slept.all()
+			if len(waits) != 9 {
+				t.Fatalf("waited %v, want nine 1s waits", waits)
+			}
+			for _, w := range waits {
+				if w != time.Second {
+					t.Fatalf("waited %v, want nine 1s waits", waits)
+				}
+			}
+		})
+	}
+}
+
+func TestRetryReturnsTheRateLimitOnceTheTotalWaitIsSpent(t *testing.T) {
+	limited := func(retryAfter string) answer { return answer{http.StatusTooManyRequests, retryAfter} }
+	cases := []struct {
+		name      string
+		script    []answer
+		opts      []Option
+		requests  int
+		waits     []time.Duration
+		succeeds  bool
+		lastAfter time.Duration
+	}{
+		{name: "eight 7s waits spend 56s and the ninth is returned", script: []answer{limited("7")}, requests: 9,
+			waits: []time.Duration{7 * time.Second, 7 * time.Second, 7 * time.Second, 7 * time.Second, 7 * time.Second, 7 * time.Second, 7 * time.Second, 7 * time.Second}, lastAfter: 7 * time.Second},
+		{name: "a 30s wait after 40s is returned without waiting", script: []answer{limited("40"), limited("30")}, requests: 2,
+			waits: []time.Duration{40 * time.Second}, lastAfter: 30 * time.Second},
+		{name: "a wait of exactly the bound is waited", script: []answer{limited("60"), {status: http.StatusOK}}, requests: 2,
+			waits: []time.Duration{60 * time.Second}, succeeds: true},
+		{name: "a zero wait counts a second, so 61 requests end it", script: []answer{limited("0")}, requests: 61,
+			waits: make([]time.Duration, 60)},
+		{name: "a shorter bound ends it sooner", script: []answer{limited("2")}, opts: []Option{WithMaxRetryAfter(5 * time.Second)}, requests: 3,
+			waits: []time.Duration{2 * time.Second, 2 * time.Second}, lastAfter: 2 * time.Second},
+		{name: "a wait that would take the total past the largest duration is returned", script: []answer{limited("1"), limited("9223372036")}, requests: 2,
+			waits: []time.Duration{time.Second}, lastAfter: 9223372036 * time.Second},
+		{name: "a Retry-After past the largest duration is returned, not wrapped to a short wait", script: []answer{limited("18446744074")}, requests: 1,
+			lastAfter: 9223372036 * time.Second},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, api := scriptedServer(t, tc.script, tc.opts...)
+			slept := recordSleeps(c)
+
+			_, err := c.GetWorkspace(context.Background(), "ws_1")
+			if tc.succeeds {
+				if err != nil {
+					t.Fatalf("err = %v, want the 200", err)
+				}
+			} else {
+				var ae *APIError
+				if !errors.As(err, &ae) || !IsRateLimited(err) {
+					t.Fatalf("err = %v, want the 429", err)
+				}
+				if ae.RetryAfter() != tc.lastAfter {
+					t.Errorf("RetryAfter() = %s, want the last answer's %s", ae.RetryAfter(), tc.lastAfter)
+				}
+			}
+			if got := api.sent(""); got != tc.requests {
+				t.Errorf("sent %d requests, want %d", got, tc.requests)
+			}
+			if got := slept.all(); fmt.Sprint(got) != fmt.Sprint(tc.waits) {
+				t.Errorf("waited %v, want %v", got, tc.waits)
+			}
+		})
+	}
+}
+
+// A 429 spends no retry of the three a server error has, and a server error none of the minute a
+// rate limit has.
+func TestRetryKeepsTheCountForServerErrorsBetweenRateLimits(t *testing.T) {
+	unavailable := answer{status: http.StatusServiceUnavailable}
+	c, api := scriptedServer(t, []answer{unavailable, {http.StatusTooManyRequests, "0"}, unavailable, unavailable, unavailable})
+	recordSleeps(c)
+	if _, err := c.GetWorkspace(context.Background(), "ws_1"); StatusCode(err) != http.StatusServiceUnavailable || api.sent("") != 5 {
+		t.Errorf("err %v after %d requests, want the last 503 after five", err, api.sent(""))
+	}
+
+	c, api = scriptedServer(t, []answer{unavailable})
+	recordSleeps(c)
+	if _, err := c.GetWorkspace(context.Background(), "ws_1"); StatusCode(err) != http.StatusServiceUnavailable || api.sent("") != 4 {
+		t.Errorf("err %v after %d requests, want the 503 after four", err, api.sent(""))
+	}
+}
+
+// The backoff grows with the waits it chose itself, not with the attempts: a server error after
+// rate limits backs off from its first step, one second.
+func TestRetryBacksOffAServerErrorFromTheFirstStepAfterRateLimits(t *testing.T) {
+	c, _ := scriptedServer(t, append(answers(9, answer{http.StatusTooManyRequests, "0"}),
+		answer{status: http.StatusServiceUnavailable}, answer{status: http.StatusOK}))
+	slept := recordSleeps(c)
+
+	if _, err := c.GetWorkspace(context.Background(), "ws_1"); err != nil {
+		t.Fatalf("err = %v, want the 200", err)
+	}
+	waits := slept.all()
+	if len(waits) != 10 {
+		t.Fatalf("waited %v, want nine zero waits and one backoff", waits)
+	}
+	for _, w := range waits[:9] {
+		if w != 0 {
+			t.Fatalf("waited %v, want nine zero waits first", waits)
+		}
+	}
+	if w := waits[9]; w < time.Second || w >= 1250*time.Millisecond {
+		t.Errorf("backed off %s after the 503, want [1s, 1.25s)", w)
+	}
+}
+
+// TestRetryStopsWhenContextIsCancelled covers the first wait in real time; a later one ends the call
+// as well, with no further request.
+func TestRetryStopsWhenCancelledDuringALaterRateLimitWait(t *testing.T) {
+	c, api := scriptedServer(t, []answer{{http.StatusTooManyRequests, "1"}})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	waits := 0
+	c.httpClient.Transport.(*retryTransport).sleep = func(ctx context.Context, _ time.Duration) error {
+		if waits++; waits == 3 {
+			cancel()
+		}
+		return ctx.Err()
+	}
+
+	if _, err := c.GetWorkspace(ctx, "ws_1"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want the cancellation", err)
+	}
+	if api.sent("") != 3 {
+		t.Errorf("sent %d requests, want 3: none after the cancelled wait", api.sent(""))
 	}
 }

@@ -51,7 +51,7 @@ client := costfluent.NewClient(
     costfluent.WithWorkspace("wsp_yyyy"),        // Default workspace
     costfluent.WithBaseURL("https://api.costfluent.com"), // Custom base URL
     costfluent.WithTimeout(60 * time.Second),    // Custom timeout
-    costfluent.WithMaxRetryAfter(10 * time.Second), // Longest rate-limit wait to sit out (default 60s)
+    costfluent.WithMaxRetryAfter(10 * time.Second), // Longest to sit out rate limits in all (default 60s)
     costfluent.WithDebug(true),                  // Enable debug logging
 )
 ```
@@ -161,9 +161,12 @@ A replayed answer leaves out what a create answers only once, so a webhook's gen
 secret is absent from it: `CreateApp` sets `App.Replayed` when the answer was a replay, and an
 empty `SigningSecret` then means the secret exists but cannot be read; give the webhook a `secret`
 of your own instead. The wait honours `Retry-After`, in seconds or as an HTTP date, or else the `RateLimit-Reset`
-seconds the API sends beside it, and stops when the context is done. A wait over 60 seconds means
-the token's quota is spent: the error is returned at once instead of waited out. The client's
-timeout applies to each attempt.
+seconds the API sends beside it, and stops when the context is done. A 429 is waited out as often
+as the API asks while the waits stay within 60 seconds in all, each counted as at least a second, so
+calls contending for a token's last requests each get their turn; the next wait that would pass
+them returns the error at once. A single wait over 60 seconds means the token's hourly quota is
+spent, and is returned at once too. A 5xx, a connection error or a proxy's 404 is retried at most
+three times, with a backoff from one second. The client's timeout applies to each attempt.
 
 Money is a `costfluent.Decimal`, the exact decimal string the API writes (`"1250.50000000"`), never a
 `float64`: compare amounts with `Equal` or `Cmp`, which ignore the scale, and take the exact value

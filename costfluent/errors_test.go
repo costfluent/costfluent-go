@@ -165,7 +165,8 @@ func TestEveryErrorStatusMapsToItsHelper(t *testing.T) {
 		{404, "operation_not_found", false, helpers{}, 1},
 		{409, "conflict", false, helpers{conflict: true}, 1},
 		{422, "unprocessable", false, helpers{}, 1},
-		{429, "rate_limit_exceeded", true, helpers{rateLimited: true}, 4},
+		// A Retry-After of 0 counts a second against the minute of rate-limit waits: 60 waits, 61 attempts.
+		{429, "rate_limit_exceeded", true, helpers{rateLimited: true}, 61},
 		{500, "internal_error", false, helpers{server: true}, 4},
 		{503, "service_unavailable", true, helpers{server: true}, 4},
 	}

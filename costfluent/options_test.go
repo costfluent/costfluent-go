@@ -505,6 +505,28 @@ func TestWithMaxRetryAfterZeroReturnsARateLimitAtOnceWithItsWait(t *testing.T) {
 	}
 }
 
+// A 429 that names no wait gets the backoff, and under WithMaxRetryAfter(0) no wait at all is
+// spent on rate limits, so it is returned at once as one that names its wait is.
+func TestWithMaxRetryAfterZeroReturnsABareRateLimitAtOnce(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = io.WriteString(w, `{"status":429,"title":"Too many requests","retryable":true}`)
+	}))
+	t.Cleanup(srv.Close)
+	c := NewClient(WithBaseURL(srv.URL), WithMaxRetryAfter(0))
+	slept := recordSleeps(c)
+
+	if _, err := c.GetWorkspace(context.Background(), "ws_1"); !IsRateLimited(err) {
+		t.Fatalf("err = %v, want the 429", err)
+	}
+	if calls.Load() != 1 || len(slept.all()) != 0 {
+		t.Errorf("sent %d times and waited %v, want one attempt and no wait", calls.Load(), slept.all())
+	}
+}
+
 func TestWithMaxRetryAfterZeroStillRetriesAServerError(t *testing.T) {
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
