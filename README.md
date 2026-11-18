@@ -8,8 +8,8 @@ library.
 go get github.com/costfluent/costfluent-go
 ```
 
-It needs Go 1.24 or later and an API token, created under **Settings**, **API tokens**, on a plan
-that includes API access.
+It needs Go 1.24 or later and an API token, created under **Settings**, **API tokens**, in any
+Costfluent organization.
 
 ## Quick Start
 

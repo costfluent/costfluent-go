@@ -8,10 +8,12 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -512,19 +514,41 @@ func TestRetryDelay(t *testing.T) {
 	backoff(t, d, ok, 30*time.Second)
 }
 
+// refusingTransport fails every connection as a port nothing listens on refuses it. A test reaches
+// an unreachable server through it rather than by closing the server: a closed server's port is
+// free for any process to take, and go test ./... runs the packages' test binaries at once, so
+// another package's test server can answer on it.
+func refusingTransport() *http.Transport {
+	tr := &http.Transport{}
+	tr.DialContext = func(_ context.Context, network, addr string) (net.Conn, error) {
+		tcp, err := net.ResolveTCPAddr(network, addr)
+		if err != nil {
+			return nil, err
+		}
+		return nil, &net.OpError{Op: "dial", Net: network, Addr: tcp, Err: os.NewSyscallError("connect", syscall.ECONNREFUSED)}
+	}
+	return tr
+}
+
 func TestUnreachableServerIsNotAnAPIError(t *testing.T) {
-	srv := httptest.NewServer(http.NotFoundHandler())
-	url := srv.URL
-	srv.Close()
-	c := NewClient(WithBaseURL(url))
+	var reached atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		reached.Add(1)
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+	c := NewClient(WithBaseURL(srv.URL), WithHTTPClient(&http.Client{Transport: refusingTransport()}))
 
 	_, err := c.TriggerProviderSync(context.Background(), "prv_1", false)
-	if err == nil || !strings.Contains(err.Error(), "executing request") {
-		t.Fatalf("err = %v", err)
+	if err == nil || !strings.Contains(err.Error(), "executing request") || !strings.Contains(err.Error(), "connection refused") {
+		t.Fatalf("err = %v, want the refused connection", err)
 	}
 	var apiErr *APIError
 	if errors.As(err, &apiErr) || StatusCode(err) != 0 {
 		t.Errorf("a connection failure reads as an API error: %v", err)
+	}
+	if n := reached.Load(); n != 0 {
+		t.Errorf("the unreachable server received %d requests", n)
 	}
 }
 

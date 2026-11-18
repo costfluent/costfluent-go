@@ -712,14 +712,20 @@ func TestClientMatchesPublicAPI(t *testing.T) {
 				_, schema := successResponse(last.op)
 				resp := s.resolve(schema)
 				ret := methodType.Out(0)
-				// A ListAll method returns the pages' data rather than a page.
-				if ret.Kind() == reflect.Slice && !isArray(resp) && resp != nil && resp.Properties["data"] != nil {
-					resp = resp.Properties["data"]
-				}
+				resp, _ = returned(ret, resp)
 				s.checkFields(t, "response", ret, resp)
 			}
 		})
 	}
+}
+
+// returned is the part of a resolved response a method's result holds, and its path below the
+// response: a ListAll method returns the pages' data rather than a page.
+func returned(ret reflect.Type, resp *specSchema) (*specSchema, string) {
+	if ret.Kind() == reflect.Slice && !isArray(resp) && resp != nil && resp.Properties["data"] != nil {
+		return resp.Properties["data"], ".data"
+	}
+	return resp, ""
 }
 
 // A zero input sends no optional query parameter, so a filter the client and the spec spell
@@ -1009,5 +1015,183 @@ func TestContractCoversEveryMethod(t *testing.T) {
 	}
 	if scanned < len(contractOps) {
 		t.Errorf("found %d (*Client) methods named in contractOps across %d Go files, want %d: the scan no longer sees the client", scanned, len(files), len(contractOps))
+	}
+}
+
+const (
+	notYetWrapped = "not yet wrapped"
+	readsOnlyID   = "a create reads only the id, then returns the object it reads back"
+)
+
+// unwrapped is what the Public API declares and the client does not expose, each with its reason: an
+// operation as "METHOD path", a query parameter as "METHOD path?name", a response property as
+// "METHOD path response.a[].b". An entry is a known gap, not a promise to keep it.
+var unwrapped = map[string]string{
+	"POST /v1/business-metrics response.createdAt":                readsOnlyID,
+	"POST /v1/business-metrics response.labelColumns":             readsOnlyID,
+	"POST /v1/business-metrics response.name":                     readsOnlyID,
+	"POST /v1/business-metrics response.unit":                     readsOnlyID,
+	"POST /v1/business-metrics response.updatedAt":                readsOnlyID,
+	"POST /v1/cost-alerts response.name":                          readsOnlyID,
+	"POST /v1/cost-report-subscriptions response.name":            readsOnlyID,
+	"POST /v1/cost-reports response.title":                        readsOnlyID,
+	"POST /v1/dashboards response.title":                          readsOnlyID,
+	"POST /v1/dashboards/{dashboardId}/widgets response.title":    readsOnlyID,
+	"POST /v1/folders response.title":                             readsOnlyID,
+	"POST /v1/saved-filters response.title":                       readsOnlyID,
+	"POST /v1/users response.email":                               readsOnlyID,
+	"POST /v1/virtual-tags response.key":                          readsOnlyID,
+	"POST /v1/workspaces response.name":                           readsOnlyID,
+	"DELETE /v1/custom-providers/{providerId}/uploads/{uploadId}": notYetWrapped,
+	"DELETE /v1/tag-keys/{tagKeyId}":                              notYetWrapped,
+	"GET /v1/contracting/data-processing-agreement":               notYetWrapped,
+	"GET /v1/cost-alerts/{alertId}/events":                        notYetWrapped,
+	"GET /v1/cost-estimates":                                      notYetWrapped,
+	"GET /v1/cost-estimates/{estimateId}":                         notYetWrapped,
+	"GET /v1/costs/forecast":                                      notYetWrapped,
+	"GET /v1/custom-providers/{providerId}/uploads":               notYetWrapped,
+	"GET /v1/custom-providers/{providerId}/uploads/{uploadId}":    notYetWrapped,
+	"GET /v1/entitlement response.ladder[].selfServeAvailable":    notYetWrapped,
+	"GET /v1/exchange-rates/currencies":                           notYetWrapped,
+	"GET /v1/exchange-rates/rate":                                 notYetWrapped,
+	"GET /v1/me response.clusterId":                               notYetWrapped,
+	"GET /v1/ping":                                                notYetWrapped,
+	"GET /v1/providers/available":                                 notYetWrapped,
+	"GET /v1/providers/{providerId}/sync-history":                 notYetWrapped,
+	"GET /v1/providers?type":                                      notYetWrapped,
+	"GET /v1/tag-keys":                                            notYetWrapped,
+	"GET /v1/tag-keys/{tagKeyId}":                                 notYetWrapped,
+	"GET /v1/workspaces/{workspaceId}/exchange-rates/policy":      notYetWrapped,
+	"POST /v1/allocation/rules/preview":                           notYetWrapped,
+	"POST /v1/custom-providers/{providerId}/uploads":              notYetWrapped,
+	"POST /v1/kubernetes/reports":                                 "the Kubernetes agent sends it through its own reporter, which imports no SDK",
+}
+
+// TestContractItemsAreWrappedOrListed runs the contract check the other way: an operation no method
+// sends, a query parameter a filled input never sends, or a response property no field of the
+// method's result reads fails unless unwrapped lists it, and an entry the client now wraps fails
+// too, so a gap in the client is one someone chose rather than one nobody saw.
+func TestContractItemsAreWrappedOrListed(t *testing.T) {
+	s := loadSpec(t)
+	wrapped := map[string]bool{}
+	for path, ops := range s.Paths {
+		for method := range ops {
+			wrapped[strings.ToUpper(method)+" "+path] = false
+		}
+	}
+	for _, name := range contractMethods() {
+		t.Run(name, func(t *testing.T) {
+			rec, m := exercise(t, s, name, true)
+			for i, got := range rec.got {
+				rt := s.match(got.method, got.path)
+				if rt == nil {
+					t.Fatalf("%s %s is not a Public API operation", got.method, got.path)
+				}
+				op := rt.method + " " + rt.template
+				wrapped[op] = true
+				for _, p := range rt.op.Parameters {
+					if p.In == "query" {
+						wrapped[op+"?"+p.Name] = wrapped[op+"?"+p.Name] || len(got.query[p.Name]) > 0
+					}
+				}
+				if m.Type().NumOut() == 2 {
+					decoded := m.Type().Out(0)
+					if i < len(rec.got)-1 {
+						// A create decodes its POST's answer into createdRef, then returns the
+						// object its GET reads back; any other earlier request decodes into a type
+						// this walk does not know.
+						if rt.method != http.MethodPost {
+							t.Fatalf("%s is sent before the last request, and only a create's POST is known to decode into createdRef", op)
+						}
+						decoded = reflect.TypeOf(createdRef{})
+					}
+					_, schema := successResponse(rt.op)
+					resp, at := returned(decoded, s.resolve(schema))
+					s.readProperties(wrapped, op+" response"+at, decoded, resp, map[checkedPair]bool{})
+				}
+			}
+		})
+	}
+	if t.Failed() {
+		return
+	}
+	items := make([]string, 0, len(wrapped))
+	for item := range wrapped {
+		items = append(items, item)
+	}
+	sort.Strings(items)
+	for _, item := range items {
+		_, listed := unwrapped[item]
+		switch {
+		case !wrapped[item] && !listed:
+			t.Errorf("%s: the Public API declares it and the client does not wrap it; wrap it, or list it in unwrapped with the reason", item)
+		case wrapped[item] && listed:
+			t.Errorf("%s: unwrapped lists it, but the client now wraps it; remove the entry", item)
+		}
+	}
+	for item := range unwrapped {
+		if _, declared := wrapped[item]; !declared {
+			t.Errorf("%s: unwrapped lists it, but no wrapped operation declares it; remove the entry", item)
+		}
+	}
+}
+
+// readProperties marks in seen, under path, each property of a response schema: true once a json
+// field of typ reads it, false while none does. It unwraps as checkFields does and does not descend
+// below a property no field reads; stack stops a recursive type such as a folder's children.
+func (s *spec) readProperties(seen map[string]bool, path string, typ reflect.Type, raw *specSchema, stack map[checkedPair]bool) {
+	pair := checkedPair{typ, raw}
+	if stack[pair] {
+		return
+	}
+	stack[pair] = true
+	defer delete(stack, pair)
+	sc := s.resolve(raw)
+	for typ.Kind() == reflect.Pointer || typ.Kind() == reflect.Slice {
+		if typ.Kind() == reflect.Slice {
+			if !isArray(sc) {
+				return
+			}
+			sc, path = s.resolve(sc.Items), path+"[]"
+		}
+		typ = typ.Elem()
+	}
+	if sc == nil {
+		return
+	}
+	if typ.Kind() == reflect.Map {
+		if sc.Values != nil && sc.Values.Schema != nil {
+			s.readProperties(seen, path+".*", typ.Elem(), sc.Values.Schema, stack)
+		}
+		return
+	}
+	if typ.Kind() != reflect.Struct || typ == timeType {
+		return
+	}
+	fields := map[string]reflect.Type{}
+	jsonFields(typ, fields)
+	for name, prop := range sc.Properties {
+		key := path + "." + name
+		field, ok := fields[name]
+		seen[key] = seen[key] || ok
+		if ok {
+			s.readProperties(seen, key, field, prop, stack)
+		}
+	}
+}
+
+// jsonFields collects the json name and type of each field of typ that encoding/json reads,
+// including those of an embedded struct, as checkStruct walks them.
+func jsonFields(typ reflect.Type, into map[string]reflect.Type) {
+	for i := 0; i < typ.NumField(); i++ {
+		f := typ.Field(i)
+		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+		if f.Anonymous && name == "" {
+			jsonFields(f.Type, into)
+			continue
+		}
+		if f.IsExported() && name != "-" && name != "" {
+			into[name] = f.Type
+		}
 	}
 }
