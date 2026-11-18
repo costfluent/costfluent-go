@@ -22548,7 +22548,7 @@
           "Apps"
         ],
         "summary": "Create app",
-        "description": "Creates a notification channel that budgets, cost alerts and report notifications can deliver to. A webhook created without a secret in its config is given one, which this answer returns once as signingSecret. A channel kind the organization\u0027s plan does not include is refused with 422 plan_upgrade_required.\n\nNeeds an organization token with \u0060createApp\u0060.",
+        "description": "Creates a notification channel that budgets, cost alerts, anomalies, expiring commitments, credit notices and stale connections deliver to as they are routed. Scheduled reports reach email, Slack and Teams channels only, never a webhook; a webhook also receives the state changes its config\u0027s events subscribe to. A webhook created without a secret in its config is given one, which this answer returns once as signingSecret; a secret the client chooses must be at least 32 characters, and a shorter one is refused with 400. A channel kind the organization\u0027s plan does not include is refused with 422 plan_upgrade_required.\n\nNeeds an organization token with \u0060createApp\u0060.",
         "operationId": "CreateApp",
         "parameters": [
           {
@@ -22865,7 +22865,7 @@
           "Apps"
         ],
         "summary": "Update app",
-        "description": "Renames a notification channel or replaces its configuration. A webhook\u0027s secret left out of the new configuration, or sent back as ***, keeps the stored one; null removes it. A webhook\u0027s url sent back in its redacted form, its scheme and host followed by /***, keeps the stored one. The kind cannot change.\n\nNeeds an organization token with \u0060updateApp\u0060.",
+        "description": "Renames a notification channel or replaces its configuration. A webhook\u0027s secret left out of the new configuration, or sent back as ***, keeps the stored one; null or an empty string removes it. A new secret must be at least 32 characters, and a shorter one is refused with 400; a secret equal to the stored one is kept, whatever its length. A webhook\u0027s url sent back in its redacted form, its scheme and host followed by /***, keeps the stored one. The kind cannot change.\n\nNeeds an organization token with \u0060updateApp\u0060.",
         "operationId": "UpdateApp",
         "parameters": [
           {
@@ -25510,7 +25510,7 @@
           "Allocation"
         ],
         "summary": "Read allocation coverage",
-        "description": "Needs a token with \u0060viewCostAllocation\u0060 on the workspace.",
+        "description": "Answers the cost the saved rules allocate in the window, per currency and segment.\n\nNeeds a token with \u0060viewCostAllocation\u0060 on the workspace.",
         "operationId": "GetAllocationCoverage",
         "parameters": [
           {
@@ -26378,7 +26378,7 @@
           "Allocation"
         ],
         "summary": "Preview an allocation rule",
-        "description": "Computes what the rule would move without creating it. Allocation is evaluated at query time, so enabling a rule restates history immediately.\n\nNeeds a token with \u0060viewCostAllocation\u0060 on the workspace.",
+        "description": "Computes what the rule would move without creating it. Allocation is evaluated at query time, so enabling a rule restates history immediately. It reads the workspace\u0027s committed cost, so it needs \u0060viewCosts\u0060 as a cost read does.\n\nNeeds a token with \u0060viewCosts\u0060 and \u0060viewCostAllocation\u0060 on the workspace.",
         "operationId": "PreviewAllocationRule",
         "requestBody": {
           "x-name": "PreviewAllocationRuleRequest",
@@ -26533,6 +26533,7 @@
         ],
         "x-costfluent-scope": "workspace",
         "x-costfluent-capability": [
+          "viewCosts",
           "viewCostAllocation"
         ]
       }
