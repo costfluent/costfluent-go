@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -27,11 +28,12 @@ func WithWorkspace(id string) Option {
 
 // WithBaseURL sets a custom base URL (useful for testing or on-prem). It must use https, since the
 // API key travels with every request; plain http is accepted only for localhost, 127.0.0.1 and ::1.
-// Any other base URL makes every request fail with the reason, before a key is sent.
+// Any other base URL makes every request fail with the reason, before a key is sent. Trailing
+// slashes are dropped, because every request path starts with one.
 func WithBaseURL(baseURL string) Option {
 	return func(c *Client) {
-		c.baseURL = baseURL
-		c.baseURLErr = checkBaseURL(baseURL)
+		c.baseURL = strings.TrimRight(baseURL, "/")
+		c.baseURLErr = checkBaseURL(c.baseURL)
 	}
 }
 

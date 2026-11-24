@@ -18,6 +18,7 @@ const (
 	ProviderKeyHetzner         ProviderKey = "hetzner"
 	ProviderKeyOvh             ProviderKey = "ovh"
 	ProviderKeyScaleway        ProviderKey = "scaleway"
+	ProviderKeyIonos           ProviderKey = "ionos"
 	ProviderKeyKubernetes      ProviderKey = "kubernetes"
 	ProviderKeyOpenShift       ProviderKey = "openShift"
 	ProviderKeyRancher         ProviderKey = "rancher"
@@ -36,6 +37,7 @@ const (
 	ProviderKeyFauna           ProviderKey = "fauna"
 	ProviderKeyTimescale       ProviderKey = "timescale"
 	ProviderKeyClickHouseCloud ProviderKey = "clickHouseCloud"
+	ProviderKeyAiven           ProviderKey = "aiven"
 	ProviderKeyDatadog         ProviderKey = "datadog"
 	ProviderKeyNewRelic        ProviderKey = "newRelic"
 	ProviderKeySplunk          ProviderKey = "splunk"
@@ -61,6 +63,8 @@ const (
 	ProviderKeyRender          ProviderKey = "render"
 	ProviderKeyFly             ProviderKey = "fly"
 	ProviderKeyHeroku          ProviderKey = "heroku"
+	ProviderKeyScalingo        ProviderKey = "scalingo"
+	ProviderKeyUpsun           ProviderKey = "upsun"
 	ProviderKeyOpenAi          ProviderKey = "openAi"
 	ProviderKeyAnthropic       ProviderKey = "anthropic"
 	ProviderKeyHuggingFace     ProviderKey = "huggingFace"
@@ -96,6 +100,7 @@ func ProviderKeys() []ProviderKey {
 		ProviderKeyHetzner,
 		ProviderKeyOvh,
 		ProviderKeyScaleway,
+		ProviderKeyIonos,
 		ProviderKeyKubernetes,
 		ProviderKeyOpenShift,
 		ProviderKeyRancher,
@@ -114,6 +119,7 @@ func ProviderKeys() []ProviderKey {
 		ProviderKeyFauna,
 		ProviderKeyTimescale,
 		ProviderKeyClickHouseCloud,
+		ProviderKeyAiven,
 		ProviderKeyDatadog,
 		ProviderKeyNewRelic,
 		ProviderKeySplunk,
@@ -139,6 +145,8 @@ func ProviderKeys() []ProviderKey {
 		ProviderKeyRender,
 		ProviderKeyFly,
 		ProviderKeyHeroku,
+		ProviderKeyScalingo,
+		ProviderKeyUpsun,
 		ProviderKeyOpenAi,
 		ProviderKeyAnthropic,
 		ProviderKeyHuggingFace,

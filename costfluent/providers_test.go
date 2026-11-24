@@ -8,7 +8,7 @@ import (
 
 const providerJSON = `{"id":"prv_1","type":"cloud","key":"aws","displayName":"AWS prod","status":"active",
 	"parentProviderId":"prv_0","externalId":"123456789012","lastSyncAt":"2026-09-21T10:00:00Z",
-	"syncFrequencyMinutes":360,"createdAt":"2026-09-01T00:00:00Z"}`
+	"syncFrequencyMinutes":360,"enableAutomaticSyncing":true,"createdAt":"2026-09-01T00:00:00Z"}`
 
 func TestProviderDecodes(t *testing.T) {
 	c, got := testClient(t, stub{200, providerJSON})
@@ -19,7 +19,20 @@ func TestProviderDecodes(t *testing.T) {
 	}
 	wantRequest(t, (*got)[0], "GET", "/v1/providers/prv_1")
 	if p.ID != "prv_1" || p.DisplayName != "AWS prod" || *p.ParentProviderID != "prv_0" || *p.ExternalID != "123456789012" ||
-		p.SyncFrequencyMinutes != 360 || p.LastSyncAt == nil {
+		p.SyncFrequencyMinutes != 360 || !p.EnableAutomaticSyncing || p.LastSyncAt == nil {
+		t.Fatalf("decoded %+v", p)
+	}
+}
+
+func TestProviderDecodesAutomaticSyncingOff(t *testing.T) {
+	c, _ := testClient(t, stub{200, `{"id":"prv_1","type":"cloud","key":"aws","displayName":"AWS prod","status":"active",
+		"syncFrequencyMinutes":10080,"enableAutomaticSyncing":false,"createdAt":"2026-09-01T00:00:00Z"}`})
+
+	p, err := c.GetProvider(context.Background(), "prv_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.EnableAutomaticSyncing || p.SyncFrequencyMinutes != 10080 || p.NextSyncAt != nil {
 		t.Fatalf("decoded %+v", p)
 	}
 }
@@ -36,9 +49,24 @@ func TestCreateProviderReturnsCreated(t *testing.T) {
 	wantRequest(t, (*got)[0], "POST", "/v1/providers")
 	wantBody(t, (*got)[0], "key", "aws")
 	wantBody(t, (*got)[0], "displayName", "AWS prod")
+	if _, sent := (*got)[0].Body["enableAutomaticSyncing"]; sent {
+		t.Error("an unset EnableAutomaticSyncing was sent, which the server would read as a choice")
+	}
 	if created.ID != "prv_1" || created.DisplayName != "AWS prod" {
 		t.Fatalf("created %+v", created)
 	}
+}
+
+func TestCreateProviderSendsAutomaticSyncingOff(t *testing.T) {
+	c, got := testClient(t, stub{200, `{"id":"prv_1","type":"cloud","key":"aws","displayName":"AWS prod"}`})
+
+	off := false
+	if _, err := c.CreateProvider(context.Background(), &CreateProviderInput{
+		Key: "aws", Credentials: map[string]string{"roleArn": "arn:aws:iam::1:role/r"}, EnableAutomaticSyncing: &off,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	wantBody(t, (*got)[0], "enableAutomaticSyncing", false)
 }
 
 func TestUpdateProviderIsPut(t *testing.T) {
@@ -54,6 +82,24 @@ func TestUpdateProviderIsPut(t *testing.T) {
 	wantRequest(t, (*got)[0], "PUT", "/v1/providers/prv_1")
 	wantBody(t, (*got)[0], "syncFrequencyMinutes", float64(720))
 	wantBody(t, (*got)[0], "externalId", ext)
+	if _, sent := (*got)[0].Body["enableAutomaticSyncing"]; sent {
+		t.Error("an unset EnableAutomaticSyncing was sent, which would change the stored choice")
+	}
+}
+
+func TestUpdateProviderSendsAutomaticSyncing(t *testing.T) {
+	for _, on := range []bool{false, true} {
+		c, got := testClient(t, stub{200, providerJSON})
+
+		if _, err := c.UpdateProvider(context.Background(), "prv_1", &UpdateProviderInput{EnableAutomaticSyncing: &on}); err != nil {
+			t.Fatal(err)
+		}
+		wantRequest(t, (*got)[0], "PUT", "/v1/providers/prv_1")
+		wantBody(t, (*got)[0], "enableAutomaticSyncing", on)
+		if len((*got)[0].Body) != 1 {
+			t.Errorf("body %v, want only enableAutomaticSyncing", (*got)[0].Body)
+		}
+	}
 }
 
 func TestTriggerProviderSync(t *testing.T) {
