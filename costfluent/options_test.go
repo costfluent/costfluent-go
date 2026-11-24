@@ -446,7 +446,7 @@ func TestWithBaseURLRefusesPlainHTTPOutsideLoopbackBeforeSendingTheKey(t *testin
 		return nil, errors.New("must not be reached")
 	})}
 
-	for _, base := range []string{"http://api.costfluent.com", "http://10.0.0.5:8080", "ftp://api.costfluent.com", "api.costfluent.com", "://broken"} {
+	for _, base := range []string{"http://api.costfluent.com", "http://api.costfluent.com/", "https://", "http://10.0.0.5:8080", "ftp://api.costfluent.com", "api.costfluent.com", "://broken"} {
 		c := NewClient(WithBaseURL(base), WithAPIKey("cf_org_secret"), WithHTTPClient(hc))
 		_, err := c.GetWorkspace(context.Background(), "ws_1")
 		if err == nil || !strings.Contains(err.Error(), "base URL") {
@@ -465,6 +465,36 @@ func TestWithBaseURLAcceptsHTTPSAndLoopbackHTTP(t *testing.T) {
 	for _, base := range []string{"https://api.costfluent.com", "http://localhost:5200", "http://127.0.0.1:5200", "http://[::1]:5200"} {
 		if err := checkBaseURL(base); err != nil {
 			t.Errorf("%s: %v", base, err)
+		}
+	}
+}
+
+func TestWithBaseURLIgnoresATrailingSlash(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"tokenType":"user"}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	for _, tc := range []struct{ base, wantPath, wantBase string }{
+		{srv.URL, "/v1/me", srv.URL},
+		{srv.URL + "/", "/v1/me", srv.URL},
+		{srv.URL + "//", "/v1/me", srv.URL},
+		{srv.URL + "/api", "/api/v1/me", srv.URL + "/api"},
+		{srv.URL + "/api/", "/api/v1/me", srv.URL + "/api"},
+	} {
+		paths = nil
+		c := NewClient(WithBaseURL(tc.base), WithAPIKey("cf_test_key"))
+		if _, err := c.GetMe(context.Background()); err != nil {
+			t.Fatalf("%s: %v", tc.base, err)
+		}
+		if len(paths) != 1 || paths[0] != tc.wantPath {
+			t.Errorf("%s: server saw %q, want [%s]", tc.base, paths, tc.wantPath)
+		}
+		if got := c.BaseURL(); got != tc.wantBase {
+			t.Errorf("%s: BaseURL() = %q, want %q", tc.base, got, tc.wantBase)
 		}
 	}
 }

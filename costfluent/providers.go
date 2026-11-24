@@ -22,8 +22,11 @@ type Provider struct {
 	LastSyncError        *string        `json:"lastSyncError,omitempty"`
 	NextSyncAt           *time.Time     `json:"nextSyncAt,omitempty"`
 	SyncFrequencyMinutes int            `json:"syncFrequencyMinutes"`
-	CreatedAt            time.Time      `json:"createdAt"`
-	UpdatedAt            *time.Time     `json:"updatedAt,omitempty"`
+	// EnableAutomaticSyncing is whether Costfluent syncs the connection on its schedule. Off, it
+	// syncs only when one is requested, and NextSyncAt is empty.
+	EnableAutomaticSyncing bool       `json:"enableAutomaticSyncing"`
+	CreatedAt              time.Time  `json:"createdAt"`
+	UpdatedAt              *time.Time `json:"updatedAt,omitempty"`
 	// ETag is the stored version this response carried, to send back with IfMatch. Empty from a
 	// list, which carries no versions.
 	ETag string `json:"-"`
@@ -93,6 +96,9 @@ type CreateProviderInput struct {
 	Credentials          map[string]string `json:"credentials"`
 	Settings             map[string]string `json:"settings,omitempty"`
 	SyncFrequencyMinutes *int              `json:"syncFrequencyMinutes,omitempty"`
+	// EnableAutomaticSyncing nil syncs the connection on its schedule; false syncs it only when one
+	// is requested.
+	EnableAutomaticSyncing *bool `json:"enableAutomaticSyncing,omitempty"`
 }
 
 // CreateProvider connects a new provider
@@ -160,14 +166,15 @@ func (c *Client) GetAwsConnector(ctx context.Context) (*AwsConnector, error) {
 // DisplayName renames the connection, which keeps its id and the costs it has collected, and
 // ClearDescription and ClearSettings remove theirs. A non-empty Settings map replaces the settings.
 type UpdateProviderInput struct {
-	DisplayName          *string           `json:"displayName,omitempty"`
-	Description          *string           `json:"description,omitempty"`
-	ClearDescription     bool              `json:"clearDescription,omitempty"`
-	ExternalID           *string           `json:"externalId,omitempty"`
-	Credentials          map[string]string `json:"credentials,omitempty"`
-	Settings             map[string]string `json:"settings,omitempty"`
-	ClearSettings        bool              `json:"clearSettings,omitempty"`
-	SyncFrequencyMinutes *int              `json:"syncFrequencyMinutes,omitempty"`
+	DisplayName            *string           `json:"displayName,omitempty"`
+	Description            *string           `json:"description,omitempty"`
+	ClearDescription       bool              `json:"clearDescription,omitempty"`
+	ExternalID             *string           `json:"externalId,omitempty"`
+	Credentials            map[string]string `json:"credentials,omitempty"`
+	Settings               map[string]string `json:"settings,omitempty"`
+	ClearSettings          bool              `json:"clearSettings,omitempty"`
+	SyncFrequencyMinutes   *int              `json:"syncFrequencyMinutes,omitempty"`
+	EnableAutomaticSyncing *bool             `json:"enableAutomaticSyncing,omitempty"`
 }
 
 // UpdateProvider updates an existing provider

@@ -528,27 +528,37 @@ func (s *spec) checkStruct(r reporter, where string, typ reflect.Type, sc *specS
 }
 
 type recorded struct {
-	method, path string
-	query        map[string][]string
-	body         []byte
+	method, path, escaped string
+	query                 map[string][]string
+	body                  []byte
 }
 
 // recorder answers every request with the smallest body its spec operation can decode into, and
-// keeps what it received.
+// keeps what it received. With id set, path is the escaped path with each occurrence of id replaced
+// by the sweep's placeholder, so an escaped ID that holds a slash or a query still matches its one
+// route, and the response the recorder picks for it is the same as for the placeholder.
 type recorder struct {
 	spec *spec
+	id   string
 	mu   sync.Mutex
 	got  []recorded
 }
 
 func (rec *recorder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
+	path := r.URL.Path
+	if rec.id != "" {
+		path = strings.ReplaceAll(r.URL.EscapedPath(), rec.id, placeholderID)
+	}
 	rec.mu.Lock()
-	rec.got = append(rec.got, recorded{r.Method, r.URL.Path, r.URL.Query(), body})
+	rec.got = append(rec.got, recorded{r.Method, path, r.URL.EscapedPath(), r.URL.Query(), body})
 	rec.mu.Unlock()
 
-	rt := rec.spec.match(r.Method, r.URL.Path)
+	rt := rec.spec.match(r.Method, path)
 	if rt == nil {
+		// As the API's problem details: a bare 404 is the proxy's to the client, which retries it
+		// for seconds before a request that reached no route fails.
+		w.Header().Set("Content-Type", "application/problem+json")
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
@@ -611,9 +621,12 @@ func filled(typ reflect.Type, depth int) reflect.Value {
 	return v
 }
 
-// call invokes a client method with placeholder arguments: a string for every ID, and for every
-// input a zero value, or a filled one when fill is set; no request options.
-func call(ctx context.Context, m reflect.Value, fill bool) []reflect.Value {
+// placeholderID is the value the sweeps pass for every string argument.
+const placeholderID = "arg-1"
+
+// call invokes a client method with placeholder arguments: id for every string, and for every input
+// a zero value, or a filled one when fill is set; no request options.
+func call(ctx context.Context, m reflect.Value, id string, fill bool) []reflect.Value {
 	ctxType := reflect.TypeOf((*context.Context)(nil)).Elem()
 	n := m.Type().NumIn()
 	if m.Type().IsVariadic() {
@@ -626,7 +639,7 @@ func call(ctx context.Context, m reflect.Value, fill bool) []reflect.Value {
 		case in == ctxType:
 			args[i] = reflect.ValueOf(ctx)
 		case in.Kind() == reflect.String:
-			args[i] = reflect.ValueOf("arg-1").Convert(in)
+			args[i] = reflect.ValueOf(id).Convert(in)
 		case fill:
 			// Every pointer, struct and slice spends one level, and the deepest required body
 			// fields, a segment split's targets[].segmentId and a cost report's
@@ -652,11 +665,14 @@ func contractMethods() []string {
 	return names
 }
 
-// exercise calls the client method name against a recorder of s, and fails unless the call succeeds
-// and sends a request.
-func exercise(t *testing.T, s *spec, name string, fill bool) (*recorder, reflect.Value) {
+// exercise calls the client method name against a recorder of s, with id for every string argument,
+// and fails unless the call succeeds and sends a request.
+func exercise(t *testing.T, s *spec, name, id string, fill bool) (*recorder, reflect.Value) {
 	t.Helper()
 	rec := &recorder{spec: s}
+	if id != placeholderID {
+		rec.id = url.PathEscape(id)
+	}
 	srv := httptest.NewServer(rec)
 	t.Cleanup(srv.Close)
 	client := NewClient(WithBaseURL(srv.URL), WithAPIKey("key"), WithWorkspace("ws-default"))
@@ -665,8 +681,11 @@ func exercise(t *testing.T, s *spec, name string, fill bool) (*recorder, reflect
 	if !m.IsValid() {
 		t.Fatalf("client has no method %s", name)
 	}
-	out := call(context.Background(), m, fill)
+	out := call(context.Background(), m, id, fill)
 	if err, _ := out[len(out)-1].Interface().(error); err != nil {
+		if len(rec.got) > 0 {
+			t.Fatalf("call failed: %v; first request %s %s?%s", err, rec.got[0].method, rec.got[0].escaped, url.Values(rec.got[0].query).Encode())
+		}
 		t.Fatalf("call failed: %v", err)
 	}
 	if len(rec.got) == 0 {
@@ -680,7 +699,7 @@ func TestClientMatchesPublicAPI(t *testing.T) {
 	for _, name := range contractMethods() {
 		want := contractOps[name]
 		t.Run(name, func(t *testing.T) {
-			rec, m := exercise(t, s, name, false)
+			rec, m := exercise(t, s, name, placeholderID, false)
 
 			first := s.match(rec.got[0].method, rec.got[0].path)
 			if first == nil || first.method != want.Method || first.template != want.Path {
@@ -719,6 +738,33 @@ func TestClientMatchesPublicAPI(t *testing.T) {
 	}
 }
 
+// unsafeID holds every character that would move a request elsewhere if a path segment carried it
+// unescaped: a slash and a dot segment change the route, a question mark starts a query that adds
+// the parameter c, and a hash cuts the rest off.
+const unsafeID = "a/../b?c=d#e"
+
+// Every ID a method puts in its path is escaped into one segment, so an ID from a Terraform import
+// or an assistant's tool call cannot send a request to another route or add a query parameter.
+func TestClientEscapesEveryPathID(t *testing.T) {
+	s := loadSpec(t)
+	for _, name := range contractMethods() {
+		want := contractOps[name]
+		t.Run(name, func(t *testing.T) {
+			rec, _ := exercise(t, s, name, unsafeID, false)
+			got := rec.got[0]
+			if first := s.match(got.method, got.path); first == nil || first.method != want.Method || first.template != want.Path {
+				t.Fatalf("first request %s %s, want %s %s with the ID escaped into its segments", got.method, got.escaped, want.Method, want.Path)
+			}
+			if strings.Contains(want.Path, "{") && !strings.Contains(got.escaped, url.PathEscape(unsafeID)) {
+				t.Fatalf("first request %s %s, want the whole ID escaped as %s", got.method, got.escaped, url.PathEscape(unsafeID))
+			}
+			if _, ok := got.query["c"]; ok {
+				t.Fatalf("first request %s %s carries the query parameter c from an ID", got.method, got.escaped)
+			}
+		})
+	}
+}
+
 // returned is the part of a resolved response a method's result holds, and its path below the
 // response: a ListAll method returns the pages' data rather than a page.
 func returned(ret reflect.Type, resp *specSchema) (*specSchema, string) {
@@ -734,7 +780,7 @@ func TestClientOptionalParametersMatchPublicAPI(t *testing.T) {
 	s := loadSpec(t)
 	for _, name := range contractMethods() {
 		t.Run(name, func(t *testing.T) {
-			rec, _ := exercise(t, s, name, true)
+			rec, _ := exercise(t, s, name, placeholderID, true)
 			for _, got := range rec.got {
 				rt := s.match(got.method, got.path)
 				if rt == nil {
@@ -959,7 +1005,7 @@ func TestContractCheckerRefusesAMissingRequiredField(t *testing.T) {
 				t.Fatal(err)
 			}
 			var errs collected
-			s.checkRequest(&errs, rt, recorded{"POST", "/v1/things", tt.query, []byte(tt.body)}, tt.strict)
+			s.checkRequest(&errs, rt, recorded{method: "POST", path: "/v1/things", query: tt.query, body: []byte(tt.body)}, tt.strict)
 			var missing []string
 			for _, e := range errs {
 				m := named.FindStringSubmatch(e)
@@ -1081,7 +1127,7 @@ func TestContractItemsAreWrappedOrListed(t *testing.T) {
 	}
 	for _, name := range contractMethods() {
 		t.Run(name, func(t *testing.T) {
-			rec, m := exercise(t, s, name, true)
+			rec, m := exercise(t, s, name, placeholderID, true)
 			for i, got := range rec.got {
 				rt := s.match(got.method, got.path)
 				if rt == nil {
