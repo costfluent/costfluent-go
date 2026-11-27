@@ -74,6 +74,7 @@ const (
 	ProviderKeyAwsBedrock      ProviderKey = "awsBedrock"
 	ProviderKeyVertexAi        ProviderKey = "vertexAi"
 	ProviderKeyCursor          ProviderKey = "cursor"
+	ProviderKeyOpenRouter      ProviderKey = "openRouter"
 	ProviderKeyTwilio          ProviderKey = "twilio"
 	ProviderKeySendGrid        ProviderKey = "sendGrid"
 	ProviderKeyMailgun         ProviderKey = "mailgun"
@@ -156,6 +157,7 @@ func ProviderKeys() []ProviderKey {
 		ProviderKeyAwsBedrock,
 		ProviderKeyVertexAi,
 		ProviderKeyCursor,
+		ProviderKeyOpenRouter,
 		ProviderKeyTwilio,
 		ProviderKeySendGrid,
 		ProviderKeyMailgun,
